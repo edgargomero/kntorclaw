@@ -97,6 +97,17 @@ func (sm *SessionManager) GetHistory(key string) []providers.Message {
 
 	history := make([]providers.Message, len(session.Messages))
 	copy(history, session.Messages)
+
+	// Sanitize tool calls: ensure Name is always populated
+	for i := range history {
+		for j := range history[i].ToolCalls {
+			tc := &history[i].ToolCalls[j]
+			if tc.Name == "" && tc.Function != nil && tc.Function.Name != "" {
+				tc.Name = tc.Function.Name
+			}
+		}
+	}
+
 	return history
 }
 
@@ -257,6 +268,16 @@ func (sm *SessionManager) loadSessions() error {
 		var session Session
 		if err := json.Unmarshal(data, &session); err != nil {
 			continue
+		}
+
+		// Sanitize tool calls on load: ensure Name is populated
+		for i := range session.Messages {
+			for j := range session.Messages[i].ToolCalls {
+				tc := &session.Messages[i].ToolCalls[j]
+				if tc.Name == "" && tc.Function != nil && tc.Function.Name != "" {
+					tc.Name = tc.Function.Name
+				}
+			}
 		}
 
 		sm.sessions[session.Key] = &session

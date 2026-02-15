@@ -192,6 +192,11 @@ func (c *WhatsAppChannel) handleMessage(msg *events.Message) {
 		return
 	}
 
+	// Ignore status broadcast messages (WhatsApp Stories/Status updates)
+	if msg.Info.Chat.Server == "broadcast" {
+		return
+	}
+
 	senderID := msg.Info.Sender.String()
 	chatID := msg.Info.Chat.String()
 

@@ -105,6 +105,7 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 			assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, providers.ToolCall{
 				ID:   tc.ID,
 				Type: "function",
+				Name: tc.Name,
 				Function: &providers.FunctionCall{
 					Name:      tc.Name,
 					Arguments: string(argumentsJSON),
