@@ -17,6 +17,12 @@ func (a *App) setupKeybindings() {
 	a.focusIndex = 0
 
 	a.tviewApp.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		// F9 toggles focus mode
+		if event.Key() == tcell.KeyF9 {
+			a.toggleFocusMode()
+			return nil
+		}
+
 		switch event.Key() {
 		case tcell.KeyF1:
 			a.setFocus(0)
@@ -34,7 +40,11 @@ func (a *App) setupKeybindings() {
 			a.setFocus(4)
 			return nil
 		case tcell.KeyF6:
-			a.setFocus(5)
+			if a.focusMode {
+				a.setFocus(5) // SPEC panel in focus mode
+			} else {
+				a.setFocus(5) // Config in normal mode
+			}
 			return nil
 		case tcell.KeyTab:
 			a.focusNext()
@@ -47,12 +57,15 @@ func (a *App) setupKeybindings() {
 			return nil
 		}
 
-		// If typing regular characters and not focused on input, redirect to input
-		if event.Key() == tcell.KeyRune {
+		// If typing regular characters and not focused on input or a focus-mode list, redirect to input
+		if event.Key() == tcell.KeyRune && event.Modifiers() == 0 {
 			focused := a.tviewApp.GetFocus()
-			if focused != a.chatInput {
+			if focused != a.chatInput &&
+				focused != a.focusFiles &&
+				focused != a.focusBranches &&
+				focused != a.focusCommits &&
+				focused != a.focusSpec {
 				a.tviewApp.SetFocus(a.chatInput)
-				// Let the key pass through to the input
 			}
 		}
 

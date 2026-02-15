@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/rivo/tview"
@@ -27,8 +28,9 @@ func (w *LogWriter) Write(p []byte) (n int, err error) {
 	}
 
 	w.app.tviewApp.QueueUpdateDraw(func() {
-		w.logsView.Write([]byte(text + "\n"))
+		fmt.Fprintf(w.logsView, "%s\n", tview.Escape(text))
 		trimLogView(w.logsView)
+		w.logsView.ScrollToEnd()
 	})
 	return len(p), nil
 }

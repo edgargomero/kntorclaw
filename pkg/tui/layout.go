@@ -27,7 +27,7 @@ func (a *App) buildLayout() *tview.Flex {
 	layout := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(a.buildHeader(), 1, 0, false).
 		AddItem(content, 0, 1, true).
-		AddItem(a.chatInput, 1, 0, false)
+		AddItem(a.chatInput, 3, 0, false)
 
 	return layout
 }
@@ -42,7 +42,78 @@ func (a *App) buildHeader() *tview.TextView {
 }
 
 func (a *App) updateStatusBar() {
-	a.statusBar.SetText(" PicoClaw " + a.version + "  [yellow]F1[white]-Chat [yellow]F2[white]-Logs [yellow]F3[white]-Channels [yellow]F4[white]-Tokens [yellow]F5[white]-Sessions [yellow]F6[white]-Config  [yellow]Tab[white]/[yellow]Shift+Tab[white] navigate  [yellow]Ctrl+C[white] quit")
+	projectIndicator := ""
+	if a.isProjectMode {
+		projectIndicator = " [black:green] PROJECT [-:-] "
+	}
+	if a.focusMode {
+		a.statusBar.SetText(" PicoClaw " + a.version + projectIndicator + " [black:yellow] FOCUS MODE [-:-]  [yellow]F1[white]-Files [yellow]F2[white]-Branches [yellow]F3[white]-Commits [yellow]F4[white]-Chat [yellow]F5[white]-Diff [yellow]F6[white]-Spec  [yellow]F9[white] exit  [yellow]Esc[white] input  [yellow]Ctrl+C[white] quit")
+	} else {
+		a.statusBar.SetText(" PicoClaw " + a.version + projectIndicator + " [yellow]F1[white]-Chat [yellow]F2[white]-Logs [yellow]F3[white]-Channels [yellow]F4[white]-Tokens [yellow]F5[white]-Sessions [yellow]F6[white]-Config  [yellow]F9[white] focus  [yellow]Tab[white]/[yellow]Shift+Tab[white] navigate  [yellow]Shift+Enter[white] newline  [yellow]Ctrl+C[white] quit")
+	}
+}
+
+func (a *App) buildFocusLayout() *tview.Flex {
+	// Left column: Files + Branches + Commits + Spec (1:1:1:1)
+	leftColumn := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(a.focusFiles, 0, 1, false).
+		AddItem(a.focusBranches, 0, 1, false).
+		AddItem(a.focusCommits, 0, 1, false).
+		AddItem(a.focusSpec, 0, 1, false)
+
+	// Right column: Chat (60%) + Diff (40%)
+	rightColumn := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(a.chatHistory, 0, 6, true).
+		AddItem(a.focusDiff, 0, 4, false)
+
+	// Main content: Left (30%) + Right (70%)
+	content := tview.NewFlex().
+		AddItem(leftColumn, 0, 30, false).
+		AddItem(rightColumn, 0, 70, true)
+
+	// Full layout: Header + Content + Input
+	layout := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(a.statusBar, 1, 0, false).
+		AddItem(content, 0, 1, true).
+		AddItem(a.chatInput, 3, 0, false)
+
+	return layout
+}
+
+func (a *App) toggleFocusMode() {
+	if a.focusMode {
+		// Exit focus mode
+		a.focusMode = false
+		a.panels = []tview.Primitive{
+			a.chatHistory,
+			a.logsView,
+			a.channelsTable,
+			a.tokensTable,
+			a.sessionsTable,
+			a.configView,
+		}
+		a.focusIndex = 0
+		a.updateStatusBar()
+		a.tviewApp.SetRoot(a.normalLayout, true)
+		a.tviewApp.SetFocus(a.chatInput)
+	} else {
+		// Enter focus mode
+		a.focusMode = true
+		a.refreshFocusPanels()
+		a.focusLayout = a.buildFocusLayout()
+		a.panels = []tview.Primitive{
+			a.focusFiles,
+			a.focusBranches,
+			a.focusCommits,
+			a.chatHistory,
+			a.focusDiff,
+			a.focusSpec,
+		}
+		a.focusIndex = 3 // Chat
+		a.updateStatusBar()
+		a.tviewApp.SetRoot(a.focusLayout, true)
+		a.tviewApp.SetFocus(a.chatInput)
+	}
 }
 
 func (a *App) buildLogsPanel() *tview.TextView {
