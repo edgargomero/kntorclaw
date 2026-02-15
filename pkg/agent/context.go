@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -134,6 +135,12 @@ The following skills extend your capabilities. To use a skill, read its SKILL.md
 		parts = append(parts, "# Memory\n\n"+memoryContext)
 	}
 
+	// Git context (if workspace is a git repo)
+	gitCtx := buildGitContext(cb.workspace)
+	if gitCtx != "" {
+		parts = append(parts, "# Git Status\n\n"+gitCtx)
+	}
+
 	// Join with "---" separator
 	return strings.Join(parts, "\n\n---\n\n")
 }
@@ -152,6 +159,12 @@ func (cb *ContextBuilder) LoadBootstrapFiles() string {
 		if data, err := os.ReadFile(filePath); err == nil {
 			result += fmt.Sprintf("## %s\n\n%s\n\n", filename, string(data))
 		}
+	}
+
+	// Load CLAUDE.md from workspace root (project instructions)
+	claudePath := filepath.Join(cb.workspace, "CLAUDE.md")
+	if data, err := os.ReadFile(claudePath); err == nil {
+		result += fmt.Sprintf("## Project Instructions (CLAUDE.md)\n\n%s\n\n", string(data))
 	}
 
 	return result
@@ -251,6 +264,55 @@ func (cb *ContextBuilder) loadSkills() string {
 	}
 
 	return "# Skill Definitions\n\n" + content
+}
+
+// buildGitContext generates a markdown summary of the git state for the workspace.
+// Returns empty string if the workspace is not a git repo.
+func buildGitContext(workspace string) string {
+	// Check if workspace is a git repo
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd.Dir = workspace
+	if _, err := cmd.Output(); err != nil {
+		return ""
+	}
+
+	var parts []string
+
+	// Current branch
+	branchCmd := exec.Command("git", "branch", "--show-current")
+	branchCmd.Dir = workspace
+	if out, err := branchCmd.Output(); err == nil {
+		branch := strings.TrimSpace(string(out))
+		if branch != "" {
+			parts = append(parts, fmt.Sprintf("**Branch:** `%s`", branch))
+		}
+	}
+
+	// Modified/staged files
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusCmd.Dir = workspace
+	if out, err := statusCmd.Output(); err == nil {
+		status := strings.TrimSpace(string(out))
+		if status != "" {
+			parts = append(parts, "**Changed files:**\n```\n"+status+"\n```")
+		}
+	}
+
+	// Recent commits
+	logCmd := exec.Command("git", "log", "--oneline", "-5")
+	logCmd.Dir = workspace
+	if out, err := logCmd.Output(); err == nil {
+		logOutput := strings.TrimSpace(string(out))
+		if logOutput != "" {
+			parts = append(parts, "**Recent commits:**\n```\n"+logOutput+"\n```")
+		}
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	return strings.Join(parts, "\n\n")
 }
 
 // GetSkillsInfo returns information about loaded skills.
