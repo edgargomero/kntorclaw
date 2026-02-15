@@ -408,6 +408,10 @@ func agentCmd() {
 	msgBus := bus.NewMessageBus()
 	agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
 
+	// Create model router
+	router := agent.NewModelRouter(cfg.Agents.Defaults.Model, cfg.Agents.Models, cfg.Agents.Aliases)
+	agentLoop.SetRouter(router)
+
 	// Print agent startup info (only for interactive mode)
 	startupInfo := agentLoop.GetStartupInfo()
 	logger.InfoCF("agent", "Agent initialized",
@@ -542,6 +546,10 @@ func gatewayCmd() {
 
 	msgBus := bus.NewMessageBus()
 	agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
+
+	// Create model router
+	gwRouter := agent.NewModelRouter(cfg.Agents.Defaults.Model, cfg.Agents.Models, cfg.Agents.Aliases)
+	agentLoop.SetRouter(gwRouter)
 
 	// Print agent startup info
 	fmt.Println("\n📦 Agent Status:")
@@ -712,9 +720,13 @@ func tuiCmd() {
 
 	msgBus := bus.NewMessageBus()
 
+	// Create model router for TUI
+	tuiRouter := agent.NewModelRouter(cfg.Agents.Defaults.Model, cfg.Agents.Models, cfg.Agents.Aliases)
+
 	// Create TUI app FIRST and redirect logs before any other initialization,
 	// so that all log output goes to the TUI logs panel instead of corrupting the screen.
 	tuiApp := tui.NewApp(cfg, msgBus, version)
+	tuiApp.SetModelRouter(tuiRouter)
 	tuiApp.SetProjectMode(isProjectMode)
 	tuiApp.Init()
 
@@ -730,6 +742,7 @@ func tuiCmd() {
 		}
 
 		agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
+		agentLoop.SetRouter(tuiRouter)
 
 		// Create checkpoint tool and QA tracker
 		checkpointTool := tools.NewCheckpointTool()

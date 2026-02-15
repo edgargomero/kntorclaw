@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"github.com/rivo/tview"
+	"github.com/sipeed/picoclaw/pkg/agent"
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/channels"
 	"github.com/sipeed/picoclaw/pkg/config"
@@ -39,6 +40,9 @@ type App struct {
 	focusQA       *tview.TextView
 	qaTracker     *QATracker
 	isProjectMode bool
+
+	// Model routing
+	modelRouter *agent.ModelRouter
 
 	// Core dependencies
 	config          *config.Config
@@ -100,6 +104,14 @@ func (a *App) Init() {
 
 	a.tviewApp.SetRoot(layout, true)
 	a.tviewApp.SetFocus(a.chatInput)
+}
+
+func (a *App) SetModelRouter(router *agent.ModelRouter) {
+	a.modelRouter = router
+}
+
+func (a *App) GetModelRouter() *agent.ModelRouter {
+	return a.modelRouter
 }
 
 func (a *App) SetChannelManager(cm *channels.Manager) {

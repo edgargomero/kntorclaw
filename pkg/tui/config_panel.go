@@ -18,7 +18,12 @@ func (a *App) renderConfig() {
 	a.configView.Clear()
 
 	fmt.Fprintf(a.configView, "[yellow]Provider:[white] %s\n", detectProvider(cfg))
-	fmt.Fprintf(a.configView, "[yellow]Model:[white] %s\n", cfg.Agents.Defaults.Model)
+	if a.modelRouter != nil {
+		model, source := a.modelRouter.GetInfo("tui", "tui:local")
+		fmt.Fprintf(a.configView, "[yellow]Model:[white] %s [gray](%s)[-]\n", model, source)
+	} else {
+		fmt.Fprintf(a.configView, "[yellow]Model:[white] %s\n", cfg.Agents.Defaults.Model)
+	}
 	fmt.Fprintf(a.configView, "[yellow]Workspace:[white] %s\n", cfg.WorkspacePath())
 	fmt.Fprintf(a.configView, "[yellow]Max Tool Iterations:[white] %d\n", cfg.Agents.Defaults.MaxToolIterations)
 

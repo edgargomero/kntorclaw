@@ -52,6 +52,7 @@ type AgentLoop struct {
 	provider       providers.LLMProvider
 	workspace      string
 	model          string
+	router         *ModelRouter
 	contextWindow  int // Maximum context window size in tokens
 	maxIterations  int
 	sessions       *session.SessionManager
@@ -168,6 +169,14 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 		tools:          toolsRegistry,
 		summarizing:    sync.Map{},
 	}
+}
+
+func (al *AgentLoop) SetRouter(router *ModelRouter) {
+	al.router = router
+}
+
+func (al *AgentLoop) GetRouter() *ModelRouter {
+	return al.router
 }
 
 func (al *AgentLoop) SetOnTokenUsage(fn func(sessionKey string, promptTokens, completionTokens int)) {
@@ -401,8 +410,14 @@ func (al *AgentLoop) runAgentLoop(ctx context.Context, opts processOptions) (str
 	// 3. Save user message to session
 	al.sessions.AddMessage(opts.SessionKey, "user", opts.UserMessage)
 
-	// 4. Run LLM iteration loop
-	finalContent, iteration, err := al.runLLMIteration(ctx, messages, opts)
+	// 4. Resolve model via router (session → channel → default)
+	model := al.model
+	if al.router != nil {
+		model = al.router.Resolve(opts.Channel, opts.SessionKey)
+	}
+
+	// 5. Run LLM iteration loop
+	finalContent, iteration, err := al.runLLMIteration(ctx, messages, opts, model)
 	if err != nil {
 		return "", err
 	}
@@ -457,7 +472,7 @@ func (al *AgentLoop) runAgentLoop(ctx context.Context, opts processOptions) (str
 
 // runLLMIteration executes the LLM call loop with tool handling.
 // Returns the final content, iteration count, and any error.
-func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.Message, opts processOptions) (string, int, error) {
+func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.Message, opts processOptions, model string) (string, int, error) {
 	iteration := 0
 	var finalContent string
 
@@ -477,7 +492,7 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.M
 		logger.DebugCF("agent", "LLM request",
 			map[string]interface{}{
 				"iteration":         iteration,
-				"model":             al.model,
+				"model":             model,
 				"messages_count":    len(messages),
 				"tools_count":       len(providerToolDefs),
 				"max_tokens":        8192,
@@ -494,7 +509,7 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.M
 			})
 
 		// Call LLM
-		response, err := al.provider.Chat(ctx, messages, providerToolDefs, al.model, map[string]interface{}{
+		response, err := al.provider.Chat(ctx, messages, providerToolDefs, model, map[string]interface{}{
 			"max_tokens":  8192,
 			"temperature": 0.7,
 		})
@@ -799,7 +814,11 @@ func (al *AgentLoop) summarizeSession(sessionKey string) {
 
 		// Merge them
 		mergePrompt := fmt.Sprintf("Merge these two conversation summaries into one cohesive summary:\n\n1: %s\n\n2: %s", s1, s2)
-		resp, err := al.provider.Chat(ctx, []providers.Message{{Role: "user", Content: mergePrompt}}, nil, al.model, map[string]interface{}{
+		summaryModel := al.model
+		if al.router != nil {
+			summaryModel = al.router.DefaultModel()
+		}
+		resp, err := al.provider.Chat(ctx, []providers.Message{{Role: "user", Content: mergePrompt}}, nil, summaryModel, map[string]interface{}{
 			"max_tokens":  1024,
 			"temperature": 0.3,
 		})
@@ -834,7 +853,11 @@ func (al *AgentLoop) summarizeBatch(ctx context.Context, batch []providers.Messa
 		prompt += fmt.Sprintf("%s: %s\n", m.Role, m.Content)
 	}
 
-	response, err := al.provider.Chat(ctx, []providers.Message{{Role: "user", Content: prompt}}, nil, al.model, map[string]interface{}{
+	summaryModel := al.model
+	if al.router != nil {
+		summaryModel = al.router.DefaultModel()
+	}
+	response, err := al.provider.Chat(ctx, []providers.Message{{Role: "user", Content: prompt}}, nil, summaryModel, map[string]interface{}{
 		"max_tokens":  1024,
 		"temperature": 0.3,
 	})

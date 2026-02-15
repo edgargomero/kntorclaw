@@ -55,7 +55,9 @@ type Config struct {
 }
 
 type AgentsConfig struct {
-	Defaults AgentDefaults `json:"defaults"`
+	Defaults AgentDefaults     `json:"defaults"`
+	Models   map[string]string `json:"models,omitempty"`  // channel → model-id
+	Aliases  map[string]string `json:"aliases,omitempty"` // short name → model-id
 }
 
 type AgentDefaults struct {

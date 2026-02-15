@@ -23,6 +23,12 @@ func (a *App) setupKeybindings() {
 			return nil
 		}
 
+		// Ctrl+M opens model picker
+		if event.Key() == tcell.KeyRune && event.Rune() == 'm' && event.Modifiers()&tcell.ModAlt != 0 {
+			a.showModelPicker()
+			return nil
+		}
+
 		switch event.Key() {
 		case tcell.KeyF1:
 			a.setFocus(0)

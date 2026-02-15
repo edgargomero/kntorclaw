@@ -33,6 +33,13 @@ func (a *App) buildChatPanel() tview.Primitive {
 			if text == "" {
 				return nil
 			}
+
+			// Intercept /model command before sending to bus
+			if a.handleModelCommand(text) {
+				a.chatInput.SetText("", true)
+				return nil
+			}
+
 			a.chatInput.SetText("", true)
 			a.appendChatMessage("You", text)
 			if a.tuiChannel != nil {
@@ -67,6 +74,45 @@ func (a *App) appendChatMessage(sender, content string) {
 	// Format content with basic code block highlighting
 	formatted := formatContent(content)
 	fmt.Fprintf(a.chatHistory, "%s\n", formatted)
+}
+
+// handleModelCommand intercepts /model commands typed in the chat input.
+// Returns true if the text was a /model command (and was handled).
+func (a *App) handleModelCommand(text string) bool {
+	if !strings.HasPrefix(text, "/model") {
+		return false
+	}
+
+	if a.modelRouter == nil {
+		a.appendChat("System", "Model router not initialized.")
+		return true
+	}
+
+	args := strings.TrimSpace(strings.TrimPrefix(text, "/model"))
+
+	// "/model" or "/model status" → show current model info
+	if args == "" || args == "status" {
+		sessionKey := "tui:local"
+		model, source := a.modelRouter.GetInfo("tui", sessionKey)
+		msg := fmt.Sprintf("Current model: %s\nSource: %s", model, source)
+		aliases := a.modelRouter.GetAliases()
+		if len(aliases) > 0 {
+			msg += "\n\nAliases:"
+			for alias, target := range aliases {
+				msg += fmt.Sprintf("\n  %s → %s", alias, target)
+			}
+		}
+		a.appendChat("System", msg)
+		return true
+	}
+
+	// "/model <name>" → set session model
+	resolved := a.modelRouter.ResolveAlias(args)
+	sessionKey := "tui:local"
+	a.modelRouter.SetSessionModel(sessionKey, resolved)
+	a.appendChat("System", fmt.Sprintf("Model changed to: %s (session override)", resolved))
+	a.renderConfig()
+	return true
 }
 
 func formatContent(content string) string {
