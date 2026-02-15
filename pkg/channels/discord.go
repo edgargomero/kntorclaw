@@ -65,7 +65,7 @@ func (c *DiscordChannel) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to open discord session: %w", err)
 	}
 
-	c.setRunning(true)
+	c.SetRunning(true)
 
 	botUser, err := c.session.User("@me")
 	if err != nil {
@@ -81,7 +81,7 @@ func (c *DiscordChannel) Start(ctx context.Context) error {
 
 func (c *DiscordChannel) Stop(ctx context.Context) error {
 	logger.InfoC("discord", "Stopping Discord bot")
-	c.setRunning(false)
+	c.SetRunning(false)
 
 	if err := c.session.Close(); err != nil {
 		return fmt.Errorf("failed to close discord session: %w", err)

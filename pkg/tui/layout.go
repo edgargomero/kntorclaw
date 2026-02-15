@@ -1,0 +1,68 @@
+package tui
+
+import (
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
+)
+
+func (a *App) buildLayout() *tview.Flex {
+	// Left column: Chat (60%) + Logs (40%)
+	leftColumn := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(a.buildChatPanel(), 0, 6, true).
+		AddItem(a.buildLogsPanel(), 0, 4, false)
+
+	// Right column: Channels (25%) + Tokens (25%) + Sessions (25%) + Config (25%)
+	rightColumn := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(a.buildChannelsPanel(), 0, 1, false).
+		AddItem(a.buildTokensPanel(), 0, 1, false).
+		AddItem(a.buildSessionsPanel(), 0, 1, false).
+		AddItem(a.buildConfigPanel(), 0, 1, false)
+
+	// Main content: Left (55%) + Right (45%)
+	content := tview.NewFlex().
+		AddItem(leftColumn, 0, 55, true).
+		AddItem(rightColumn, 0, 45, false)
+
+	// Full layout: Header + Content + Input
+	layout := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(a.buildHeader(), 1, 0, false).
+		AddItem(content, 0, 1, true).
+		AddItem(a.chatInput, 1, 0, false)
+
+	return layout
+}
+
+func (a *App) buildHeader() *tview.TextView {
+	a.statusBar = tview.NewTextView().
+		SetDynamicColors(true).
+		SetTextAlign(tview.AlignLeft)
+	a.statusBar.SetBackgroundColor(tcell.ColorDarkBlue)
+	a.updateStatusBar()
+	return a.statusBar
+}
+
+func (a *App) updateStatusBar() {
+	a.statusBar.SetText(" PicoClaw " + a.version + "  [yellow]F1[white]-Chat [yellow]F2[white]-Logs [yellow]F3[white]-Channels [yellow]F4[white]-Tokens [yellow]F5[white]-Sessions [yellow]F6[white]-Config  [yellow]Tab[white]/[yellow]Shift+Tab[white] navigate  [yellow]Ctrl+C[white] quit")
+}
+
+func (a *App) buildLogsPanel() *tview.TextView {
+	return a.logsView
+}
+
+func newPanel(title string) *tview.TextView {
+	tv := tview.NewTextView().
+		SetDynamicColors(true).
+		SetScrollable(true).
+		SetWordWrap(true)
+	tv.SetBorder(true).SetTitle(" " + title + " ")
+	return tv
+}
+
+func newTable(title string) *tview.Table {
+	t := tview.NewTable().
+		SetBorders(false).
+		SetSelectable(false, false).
+		SetFixed(1, 0)
+	t.SetBorder(true).SetTitle(" " + title + " ")
+	return t
+}

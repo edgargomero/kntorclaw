@@ -69,7 +69,7 @@ func (c *DingTalkChannel) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to start stream client: %w", err)
 	}
 
-	c.setRunning(true)
+	c.SetRunning(true)
 	logger.InfoC("dingtalk", "DingTalk channel started (Stream Mode)")
 	return nil
 }
@@ -86,7 +86,7 @@ func (c *DingTalkChannel) Stop(ctx context.Context) error {
 		c.streamClient.Close()
 	}
 
-	c.setRunning(false)
+	c.SetRunning(false)
 	logger.InfoC("dingtalk", "DingTalk channel stopped")
 	return nil
 }

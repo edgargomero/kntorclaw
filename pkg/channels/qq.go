@@ -90,11 +90,11 @@ func (c *QQChannel) Start(ctx context.Context) error {
 			logger.ErrorCF("qq", "WebSocket session error", map[string]interface{}{
 				"error": err.Error(),
 			})
-			c.setRunning(false)
+			c.SetRunning(false)
 		}
 	}()
 
-	c.setRunning(true)
+	c.SetRunning(true)
 	logger.InfoC("qq", "QQ bot started successfully")
 
 	return nil
@@ -102,7 +102,7 @@ func (c *QQChannel) Start(ctx context.Context) error {
 
 func (c *QQChannel) Stop(ctx context.Context) error {
 	logger.InfoC("qq", "Stopping QQ bot")
-	c.setRunning(false)
+	c.SetRunning(false)
 
 	if c.cancel != nil {
 		c.cancel()

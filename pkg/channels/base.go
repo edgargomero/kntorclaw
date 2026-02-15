@@ -103,6 +103,6 @@ func (c *BaseChannel) HandleMessage(senderID, chatID, content string, media []st
 	c.bus.PublishInbound(msg)
 }
 
-func (c *BaseChannel) setRunning(running bool) {
+func (c *BaseChannel) SetRunning(running bool) {
 	c.running = running
 }

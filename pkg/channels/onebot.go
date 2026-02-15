@@ -132,7 +132,7 @@ func (c *OneBotChannel) Start(ctx context.Context) error {
 		}
 	}
 
-	c.setRunning(true)
+	c.SetRunning(true)
 	logger.InfoC("onebot", "OneBot channel started successfully")
 
 	return nil
@@ -191,7 +191,7 @@ func (c *OneBotChannel) reconnectLoop() {
 
 func (c *OneBotChannel) Stop(ctx context.Context) error {
 	logger.InfoC("onebot", "Stopping OneBot channel")
-	c.setRunning(false)
+	c.SetRunning(false)
 
 	if c.cancel != nil {
 		c.cancel()

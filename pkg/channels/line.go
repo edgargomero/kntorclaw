@@ -111,7 +111,7 @@ func (c *LINEChannel) Start(ctx context.Context) error {
 		}
 	}()
 
-	c.setRunning(true)
+	c.SetRunning(true)
 	logger.InfoC("line", "LINE channel started (Webhook Mode)")
 	return nil
 }
@@ -168,7 +168,7 @@ func (c *LINEChannel) Stop(ctx context.Context) error {
 		}
 	}
 
-	c.setRunning(false)
+	c.SetRunning(false)
 	logger.InfoC("line", "LINE channel stopped")
 	return nil
 }

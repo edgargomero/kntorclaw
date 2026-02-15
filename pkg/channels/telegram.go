@@ -88,7 +88,7 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to start long polling: %w", err)
 	}
 
-	c.setRunning(true)
+	c.SetRunning(true)
 	logger.InfoCF("telegram", "Telegram bot connected", map[string]interface{}{
 		"username": c.bot.Username(),
 	})
@@ -115,7 +115,7 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 
 func (c *TelegramChannel) Stop(ctx context.Context) error {
 	logger.InfoC("telegram", "Stopping Telegram bot...")
-	c.setRunning(false)
+	c.SetRunning(false)
 	return nil
 }
 

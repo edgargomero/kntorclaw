@@ -60,7 +60,7 @@ func (c *FeishuChannel) Start(ctx context.Context) error {
 	wsClient := c.wsClient
 	c.mu.Unlock()
 
-	c.setRunning(true)
+	c.SetRunning(true)
 	logger.InfoC("feishu", "Feishu channel started (websocket mode)")
 
 	go func() {
@@ -83,7 +83,7 @@ func (c *FeishuChannel) Stop(ctx context.Context) error {
 	c.wsClient = nil
 	c.mu.Unlock()
 
-	c.setRunning(false)
+	c.SetRunning(false)
 	logger.InfoC("feishu", "Feishu channel stopped")
 	return nil
 }

@@ -35,6 +35,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/skills"
 	"github.com/sipeed/picoclaw/pkg/state"
 	"github.com/sipeed/picoclaw/pkg/tools"
+	"github.com/sipeed/picoclaw/pkg/tui"
 	"github.com/sipeed/picoclaw/pkg/voice"
 )
 
@@ -119,8 +120,8 @@ func copyDirectory(src, dst string) error {
 
 func main() {
 	if len(os.Args) < 2 {
-		printHelp()
-		os.Exit(1)
+		tuiCmd()
+		return
 	}
 
 	command := os.Args[1]
@@ -617,6 +618,12 @@ func gatewayCmd() {
 				logger.InfoC("voice", "Groq transcription attached to Slack channel")
 			}
 		}
+		if whatsappChannel, ok := channelManager.GetChannel("whatsapp"); ok {
+			if wc, ok := whatsappChannel.(*channels.WhatsAppChannel); ok {
+				wc.SetTranscriber(transcriber)
+				logger.InfoC("voice", "Groq transcription attached to WhatsApp channel")
+			}
+		}
 	}
 
 	enabledChannels := channelManager.GetEnabledChannels()
@@ -672,6 +679,146 @@ func gatewayCmd() {
 	agentLoop.Stop()
 	channelManager.StopAll(ctx)
 	fmt.Println("✓ Gateway stopped")
+}
+
+func tuiCmd() {
+	// Check for --debug flag
+	for _, arg := range os.Args[1:] {
+		if arg == "--debug" || arg == "-d" {
+			logger.SetLevel(logger.DEBUG)
+			break
+		}
+	}
+
+	cfg, err := loadConfig()
+	if err != nil {
+		fmt.Printf("Error loading config: %v\n", err)
+		os.Exit(1)
+	}
+
+	msgBus := bus.NewMessageBus()
+
+	// Create TUI app FIRST and redirect logs before any other initialization,
+	// so that all log output goes to the TUI logs panel instead of corrupting the screen.
+	tuiApp := tui.NewApp(cfg, msgBus, version)
+	tuiApp.Init()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Start all services in a goroutine so tview.Run() can take control of the terminal.
+	// All log output from service initialization will appear in the TUI logs panel.
+	go func() {
+		provider, err := providers.CreateProvider(cfg)
+		if err != nil {
+			logger.ErrorCF("tui", "Failed to create provider", map[string]interface{}{"error": err.Error()})
+			return
+		}
+
+		agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
+
+		cronService := setupCronTool(agentLoop, msgBus, cfg.WorkspacePath())
+
+		heartbeatService := heartbeat.NewHeartbeatService(
+			cfg.WorkspacePath(),
+			cfg.Heartbeat.Interval,
+			cfg.Heartbeat.Enabled,
+		)
+		heartbeatService.SetBus(msgBus)
+		heartbeatService.SetHandler(func(prompt, channel, chatID string) *tools.ToolResult {
+			if channel == "" || chatID == "" {
+				channel, chatID = "tui", "local"
+			}
+			response, err := agentLoop.ProcessHeartbeat(context.Background(), prompt, channel, chatID)
+			if err != nil {
+				return tools.ErrorResult(fmt.Sprintf("Heartbeat error: %v", err))
+			}
+			if response == "HEARTBEAT_OK" {
+				return tools.SilentResult("Heartbeat OK")
+			}
+			return tools.SilentResult(response)
+		})
+
+		channelManager, err := channels.NewManager(cfg, msgBus)
+		if err != nil {
+			logger.ErrorCF("tui", "Failed to create channel manager", map[string]interface{}{"error": err.Error()})
+			return
+		}
+
+		var transcriber *voice.GroqTranscriber
+		if cfg.Providers.Groq.APIKey != "" {
+			transcriber = voice.NewGroqTranscriber(cfg.Providers.Groq.APIKey)
+		}
+		if transcriber != nil {
+			if telegramChannel, ok := channelManager.GetChannel("telegram"); ok {
+				if tc, ok := telegramChannel.(*channels.TelegramChannel); ok {
+					tc.SetTranscriber(transcriber)
+				}
+			}
+			if discordChannel, ok := channelManager.GetChannel("discord"); ok {
+				if dc, ok := discordChannel.(*channels.DiscordChannel); ok {
+					dc.SetTranscriber(transcriber)
+				}
+			}
+			if slackChannel, ok := channelManager.GetChannel("slack"); ok {
+				if sc, ok := slackChannel.(*channels.SlackChannel); ok {
+					sc.SetTranscriber(transcriber)
+				}
+			}
+			if whatsappChannel, ok := channelManager.GetChannel("whatsapp"); ok {
+				if wc, ok := whatsappChannel.(*channels.WhatsAppChannel); ok {
+					wc.SetTranscriber(transcriber)
+				}
+			}
+		}
+
+		channelManager.RegisterChannel("tui", tuiApp.GetTUIChannel())
+		tuiApp.SetChannelManager(channelManager)
+
+		if err := cronService.Start(); err != nil {
+			logger.ErrorCF("tui", "Failed to start cron service", map[string]interface{}{"error": err.Error()})
+		}
+
+		if err := heartbeatService.Start(); err != nil {
+			logger.ErrorCF("tui", "Failed to start heartbeat service", map[string]interface{}{"error": err.Error()})
+		}
+
+		stateManager := state.NewManager(cfg.WorkspacePath())
+		deviceService := devices.NewService(devices.Config{
+			Enabled:    cfg.Devices.Enabled,
+			MonitorUSB: cfg.Devices.MonitorUSB,
+		}, stateManager)
+		deviceService.SetBus(msgBus)
+		if err := deviceService.Start(ctx); err != nil {
+			logger.ErrorCF("tui", "Failed to start device service", map[string]interface{}{"error": err.Error()})
+		}
+
+		if err := channelManager.StartAll(ctx); err != nil {
+			logger.ErrorCF("tui", "Failed to start channels", map[string]interface{}{"error": err.Error()})
+		}
+
+		go agentLoop.Run(ctx)
+
+		tuiApp.StartBackgroundTasks()
+
+		logger.InfoC("tui", "All services started")
+
+		// Wait for context cancellation to perform cleanup
+		<-ctx.Done()
+		deviceService.Stop()
+		heartbeatService.Stop()
+		cronService.Stop()
+		agentLoop.Stop()
+		channelManager.StopAll(ctx)
+	}()
+
+	// Run TUI (blocks until user quits with Ctrl+C)
+	if err := tuiApp.Run(); err != nil {
+		fmt.Printf("TUI error: %v\n", err)
+	}
+
+	cancel()
+	// Give goroutine a moment to clean up
+	time.Sleep(500 * time.Millisecond)
 }
 
 func statusCmd() {

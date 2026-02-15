@@ -90,7 +90,7 @@ func (c *SlackChannel) Start(ctx context.Context) error {
 		}
 	}()
 
-	c.setRunning(true)
+	c.SetRunning(true)
 	logger.InfoC("slack", "Slack channel started (Socket Mode)")
 	return nil
 }
@@ -102,7 +102,7 @@ func (c *SlackChannel) Stop(ctx context.Context) error {
 		c.cancel()
 	}
 
-	c.setRunning(false)
+	c.SetRunning(false)
 	logger.InfoC("slack", "Slack channel stopped")
 	return nil
 }
