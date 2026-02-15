@@ -38,6 +38,15 @@ type ActivityEvent struct {
 	Iterations int    // total iterations so far, populated when Type == "idle"
 }
 
+// ToolResultEvent is emitted after each tool execution completes.
+type ToolResultEvent struct {
+	SessionKey string
+	ToolName   string // "exec"
+	Command    string // extracted from args["command"]
+	Output     string // tool result content
+	IsError    bool
+}
+
 type AgentLoop struct {
 	bus            *bus.MessageBus
 	provider       providers.LLMProvider
@@ -53,6 +62,7 @@ type AgentLoop struct {
 	summarizing    sync.Map // Tracks which sessions are currently being summarized
 	onTokenUsage   func(sessionKey string, promptTokens, completionTokens int)
 	onActivity     func(event ActivityEvent)
+	onToolResult   func(event ToolResultEvent)
 }
 
 // processOptions configures how a message is processed
@@ -166,6 +176,10 @@ func (al *AgentLoop) SetOnTokenUsage(fn func(sessionKey string, promptTokens, co
 
 func (al *AgentLoop) SetOnActivity(fn func(event ActivityEvent)) {
 	al.onActivity = fn
+}
+
+func (al *AgentLoop) SetOnToolResult(fn func(event ToolResultEvent)) {
+	al.onToolResult = fn
 }
 
 func (al *AgentLoop) Run(ctx context.Context) error {
@@ -582,6 +596,18 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.M
 			}
 
 			toolResult := al.tools.ExecuteWithContext(ctx, tc.Name, tc.Arguments, opts.Channel, opts.ChatID, asyncCallback)
+
+			// Emit tool result event for QA tracking
+			if al.onToolResult != nil {
+				cmdStr, _ := tc.Arguments["command"].(string)
+				al.onToolResult(ToolResultEvent{
+					SessionKey: opts.SessionKey,
+					ToolName:   tc.Name,
+					Command:    cmdStr,
+					Output:     toolResult.ForLLM,
+					IsError:    toolResult.IsError,
+				})
+			}
 
 			// Send ForUser content to user immediately if not Silent
 			if !toolResult.Silent && toolResult.ForUser != "" && opts.SendResponse {

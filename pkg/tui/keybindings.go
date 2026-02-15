@@ -41,11 +41,23 @@ func (a *App) setupKeybindings() {
 			return nil
 		case tcell.KeyF6:
 			if a.focusMode {
-				a.setFocus(5) // SPEC panel in focus mode
+				a.setFocus(5) // QA panel in focus mode
 			} else {
 				a.setFocus(5) // Config in normal mode
 			}
 			return nil
+		case tcell.KeyEnter:
+			// Approve checkpoint when QA panel is focused and waiting
+			if a.focusMode && a.qaTracker != nil && a.qaTracker.WaitingApproval {
+				focused := a.tviewApp.GetFocus()
+				if focused == a.focusQA {
+					a.qaTracker.Approve()
+					a.tviewApp.QueueUpdateDraw(func() {
+						a.refreshQAPanel()
+					})
+					return nil
+				}
+			}
 		case tcell.KeyTab:
 			a.focusNext()
 			return nil
@@ -53,6 +65,17 @@ func (a *App) setupKeybindings() {
 			a.focusPrev()
 			return nil
 		case tcell.KeyEsc:
+			// Reject checkpoint when QA panel is focused and waiting
+			if a.focusMode && a.qaTracker != nil && a.qaTracker.WaitingApproval {
+				focused := a.tviewApp.GetFocus()
+				if focused == a.focusQA {
+					a.qaTracker.Reject()
+					a.tviewApp.QueueUpdateDraw(func() {
+						a.refreshQAPanel()
+					})
+					return nil
+				}
+			}
 			a.tviewApp.SetFocus(a.chatInput)
 			return nil
 		}
@@ -64,7 +87,7 @@ func (a *App) setupKeybindings() {
 				focused != a.focusFiles &&
 				focused != a.focusBranches &&
 				focused != a.focusCommits &&
-				focused != a.focusSpec {
+				focused != a.focusQA {
 				a.tviewApp.SetFocus(a.chatInput)
 			}
 		}

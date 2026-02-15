@@ -731,6 +731,18 @@ func tuiCmd() {
 
 		agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
 
+		// Create checkpoint tool and QA tracker
+		checkpointTool := tools.NewCheckpointTool()
+		agentLoop.RegisterTool(checkpointTool)
+		qaTracker := tui.NewQATracker(checkpointTool)
+		tuiApp.SetQATracker(qaTracker)
+
+		// Wire tool result events to QA tracker
+		agentLoop.SetOnToolResult(func(event agent.ToolResultEvent) {
+			qaTracker.HandleToolResult(event.ToolName, event.Command, event.Output, event.IsError)
+			tuiApp.QueueUpdateDraw(func() {})
+		})
+
 		// Wire activity and token tracking to TUI
 		activityTracker := tuiApp.GetActivityTracker()
 		agentLoop.SetOnActivity(func(event agent.ActivityEvent) {

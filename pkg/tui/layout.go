@@ -47,7 +47,7 @@ func (a *App) updateStatusBar() {
 		projectIndicator = " [black:green] PROJECT [-:-] "
 	}
 	if a.focusMode {
-		a.statusBar.SetText(" PicoClaw " + a.version + projectIndicator + " [black:yellow] FOCUS MODE [-:-]  [yellow]F1[white]-Files [yellow]F2[white]-Branches [yellow]F3[white]-Commits [yellow]F4[white]-Chat [yellow]F5[white]-Diff [yellow]F6[white]-Spec  [yellow]F9[white] exit  [yellow]Esc[white] input  [yellow]Ctrl+C[white] quit")
+		a.statusBar.SetText(" PicoClaw " + a.version + projectIndicator + " [black:yellow] FOCUS MODE [-:-]  [yellow]F1[white]-Files [yellow]F2[white]-Branches [yellow]F3[white]-Commits [yellow]F4[white]-Chat [yellow]F5[white]-Diff [yellow]F6[white]-QA  [yellow]F9[white] exit  [yellow]Esc[white] input  [yellow]Ctrl+C[white] quit")
 	} else {
 		a.statusBar.SetText(" PicoClaw " + a.version + projectIndicator + " [yellow]F1[white]-Chat [yellow]F2[white]-Logs [yellow]F3[white]-Channels [yellow]F4[white]-Tokens [yellow]F5[white]-Sessions [yellow]F6[white]-Config  [yellow]F9[white] focus  [yellow]Tab[white]/[yellow]Shift+Tab[white] navigate  [yellow]Shift+Enter[white] newline  [yellow]Ctrl+C[white] quit")
 	}
@@ -59,7 +59,7 @@ func (a *App) buildFocusLayout() *tview.Flex {
 		AddItem(a.focusFiles, 0, 1, false).
 		AddItem(a.focusBranches, 0, 1, false).
 		AddItem(a.focusCommits, 0, 1, false).
-		AddItem(a.focusSpec, 0, 1, false)
+		AddItem(a.focusQA, 0, 1, false)
 
 	// Right column: Chat (60%) + Diff (40%)
 	rightColumn := tview.NewFlex().SetDirection(tview.FlexRow).
@@ -107,7 +107,7 @@ func (a *App) toggleFocusMode() {
 			a.focusCommits,
 			a.chatHistory,
 			a.focusDiff,
-			a.focusSpec,
+			a.focusQA,
 		}
 		a.focusIndex = 3 // Chat
 		a.updateStatusBar()

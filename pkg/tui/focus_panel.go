@@ -3,8 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -80,73 +78,6 @@ func (a *App) updateFocusDiffForCommit(hash string) {
 	a.focusDiff.ScrollToBeginning()
 }
 
-func (a *App) buildFocusSpecPanel() *tview.TextView {
-	tv := tview.NewTextView().
-		SetDynamicColors(true).
-		SetScrollable(true).
-		SetWordWrap(true)
-	tv.SetBorder(true).SetTitle(" SPEC [F6] ")
-	return tv
-}
-
-func (a *App) refreshSpecPanel() {
-	if a.focusSpec == nil {
-		return
-	}
-
-	// Try SPEC.md from project root (cwd), then .picoclaw/SPEC.md
-	specPath := ""
-	cwd, _ := os.Getwd()
-	candidates := []string{
-		filepath.Join(cwd, "SPEC.md"),
-		filepath.Join(cwd, ".picoclaw", "SPEC.md"),
-	}
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			specPath = c
-			break
-		}
-	}
-
-	a.focusSpec.Clear()
-	if specPath == "" {
-		fmt.Fprintf(a.focusSpec, "[gray]No SPEC.md found.\nCreate SPEC.md in project root to track tasks.[-]")
-		return
-	}
-
-	data, err := os.ReadFile(specPath)
-	if err != nil {
-		fmt.Fprintf(a.focusSpec, "[red]Error reading SPEC.md: %v[-]", err)
-		return
-	}
-
-	fmt.Fprintf(a.focusSpec, "%s", formatSpec(string(data)))
-}
-
-func formatSpec(content string) string {
-	var b strings.Builder
-	for _, line := range strings.Split(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(trimmed, "# "):
-			b.WriteString("[white::b]" + tview.Escape(line) + "[-::-]\n")
-		case strings.HasPrefix(trimmed, "## ") || strings.HasPrefix(trimmed, "### "):
-			b.WriteString("[white::b]" + tview.Escape(line) + "[-::-]\n")
-		case strings.HasPrefix(trimmed, "- [x]") || strings.HasPrefix(trimmed, "- [X]"):
-			text := strings.TrimPrefix(trimmed, "- [x]")
-			text = strings.TrimPrefix(text, "- [X]")
-			b.WriteString("[green]  ☑" + tview.Escape(text) + "[-]\n")
-		case strings.HasPrefix(trimmed, "- [ ]"):
-			text := strings.TrimPrefix(trimmed, "- [ ]")
-			b.WriteString("[gray]  ☐" + tview.Escape(text) + "[-]\n")
-		case strings.HasPrefix(trimmed, "- "):
-			b.WriteString("[white]  • " + tview.Escape(strings.TrimPrefix(trimmed, "- ")) + "[-]\n")
-		default:
-			b.WriteString("[white]" + tview.Escape(line) + "[-]\n")
-		}
-	}
-	return b.String()
-}
 
 func (a *App) updateFocusDiff(file string) {
 	if a.focusDiff == nil {
@@ -233,8 +164,8 @@ func (a *App) refreshFocusData() {
 		a.focusCommits.AddItem(fmt.Sprintf("[darkcyan]%s[-] %s", c.Hash, c.Message), "", 0, nil)
 	}
 
-	// Spec
-	a.refreshSpecPanel()
+	// QA
+	a.refreshQAPanel()
 }
 
 func (a *App) startFocusRefresh(ctx context.Context) {

@@ -36,7 +36,8 @@ type App struct {
 	focusBranches *tview.List
 	focusCommits  *tview.List
 	focusDiff     *tview.TextView
-	focusSpec     *tview.TextView
+	focusQA       *tview.TextView
+	qaTracker     *QATracker
 	isProjectMode bool
 
 	// Core dependencies
@@ -87,7 +88,7 @@ func (a *App) Init() {
 	a.focusBranches = a.buildFocusBranchesPanel()
 	a.focusCommits = a.buildFocusCommitsPanel()
 	a.focusDiff = a.buildFocusDiffPanel()
-	a.focusSpec = a.buildFocusSpecPanel()
+	a.focusQA = a.buildFocusQAPanel()
 
 	// Setup keybindings (needs panels to be created)
 	a.setupKeybindings()
@@ -113,6 +114,14 @@ func (a *App) GetActivityTracker() *ActivityTracker {
 	return a.activityTracker
 }
 
+func (a *App) SetQATracker(qt *QATracker) {
+	a.qaTracker = qt
+}
+
+func (a *App) GetQATracker() *QATracker {
+	return a.qaTracker
+}
+
 func (a *App) StartBackgroundTasks() {
 	a.startChannelsRefresh(a.ctx)
 	a.startSessionsRefresh(a.ctx)
@@ -127,4 +136,9 @@ func (a *App) Run() error {
 func (a *App) Stop() {
 	a.cancel()
 	a.tviewApp.Stop()
+}
+
+// QueueUpdateDraw queues a UI update on the tview event loop.
+func (a *App) QueueUpdateDraw(f func()) {
+	a.tviewApp.QueueUpdateDraw(f)
 }
