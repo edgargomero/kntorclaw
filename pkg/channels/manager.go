@@ -59,7 +59,10 @@ func (m *Manager) initChannels() error {
 		}
 	}
 
-	if m.config.Channels.WhatsApp.Enabled && m.config.Channels.WhatsApp.BridgeURL != "" {
+	if m.config.Channels.WhatsApp.Enabled {
+		if m.config.Channels.WhatsApp.BridgeURL != "" && m.config.Channels.WhatsApp.SessionPath == "" {
+			logger.WarnC("channels", "WhatsApp bridge_url is deprecated. Please use session_path for native WhatsApp support.")
+		}
 		logger.DebugC("channels", "Attempting to initialize WhatsApp channel")
 		whatsapp, err := NewWhatsAppChannel(m.config.Channels.WhatsApp, m.bus)
 		if err != nil {

@@ -29,7 +29,7 @@ func NewClaudeProviderWithBearerToken(token string) *ClaudeProvider {
 		option.WithAuthToken(token),
 		option.WithBaseURL("https://api.anthropic.com"),
 		option.WithHeader("anthropic-beta", "claude-code-20250219,oauth-2025-04-20"),
-		option.WithHeader("user-agent", "claude-cli/2.1.2 (external, cli)"),
+		option.WithHeader("user-agent", "claude-cli/2.1.42 (external, cli)"),
 		option.WithHeader("x-app", "cli"),
 	)
 	return &ClaudeProvider{client: &client, useAPIKey: false}

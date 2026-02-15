@@ -82,9 +82,10 @@ type ChannelsConfig struct {
 }
 
 type WhatsAppConfig struct {
-	Enabled   bool                `json:"enabled" env:"PICOCLAW_CHANNELS_WHATSAPP_ENABLED"`
-	BridgeURL string              `json:"bridge_url" env:"PICOCLAW_CHANNELS_WHATSAPP_BRIDGE_URL"`
-	AllowFrom FlexibleStringSlice `json:"allow_from" env:"PICOCLAW_CHANNELS_WHATSAPP_ALLOW_FROM"`
+	Enabled     bool                `json:"enabled" env:"PICOCLAW_CHANNELS_WHATSAPP_ENABLED"`
+	SessionPath string              `json:"session_path" env:"PICOCLAW_CHANNELS_WHATSAPP_SESSION_PATH"`
+	BridgeURL   string              `json:"bridge_url,omitempty" env:"PICOCLAW_CHANNELS_WHATSAPP_BRIDGE_URL"`
+	AllowFrom   FlexibleStringSlice `json:"allow_from" env:"PICOCLAW_CHANNELS_WHATSAPP_ALLOW_FROM"`
 }
 
 type TelegramConfig struct {
@@ -229,9 +230,9 @@ func DefaultConfig() *Config {
 		},
 		Channels: ChannelsConfig{
 			WhatsApp: WhatsAppConfig{
-				Enabled:   false,
-				BridgeURL: "ws://localhost:3001",
-				AllowFrom: FlexibleStringSlice{},
+				Enabled:     false,
+				SessionPath: "~/.picoclaw/whatsapp.db",
+				AllowFrom:   FlexibleStringSlice{},
 			},
 			Telegram: TelegramConfig{
 				Enabled:   false,
