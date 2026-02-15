@@ -4,55 +4,11 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
-
-type TokenUsage struct {
-	InputTokens  int
-	OutputTokens int
-}
-
-type TokenTracker struct {
-	sessions map[string]*TokenUsage
-	mu       sync.RWMutex
-}
-
-func NewTokenTracker() *TokenTracker {
-	return &TokenTracker{
-		sessions: make(map[string]*TokenUsage),
-	}
-}
-
-func (t *TokenTracker) Add(sessionKey string, input, output int) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	usage, ok := t.sessions[sessionKey]
-	if !ok {
-		usage = &TokenUsage{}
-		t.sessions[sessionKey] = usage
-	}
-	usage.InputTokens += input
-	usage.OutputTokens += output
-}
-
-func (t *TokenTracker) GetAll() map[string]*TokenUsage {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	result := make(map[string]*TokenUsage, len(t.sessions))
-	for k, v := range t.sessions {
-		result[k] = &TokenUsage{
-			InputTokens:  v.InputTokens,
-			OutputTokens: v.OutputTokens,
-		}
-	}
-	return result
-}
 
 func (a *App) buildTokensPanel() *tview.Table {
 	a.tokensTable = newTable("TOKENS [F4]")
@@ -88,7 +44,7 @@ func (a *App) startTokensRefresh(ctx context.Context) {
 }
 
 func (a *App) refreshTokens() {
-	all := a.tokenTracker.GetAll()
+	all := a.activityTracker.GetAll()
 
 	a.tviewApp.QueueUpdateDraw(func() {
 		rowCount := a.tokensTable.GetRowCount()
@@ -99,18 +55,20 @@ func (a *App) refreshTokens() {
 		row := 1
 		keys := make([]string, 0, len(all))
 		for k := range all {
-			keys = append(keys, k)
+			if all[k].InputTokens > 0 || all[k].OutputTokens > 0 {
+				keys = append(keys, k)
+			}
 		}
 		sort.Strings(keys)
 
 		for _, key := range keys {
-			usage := all[key]
+			sa := all[key]
 			a.tokensTable.SetCell(row, 0,
 				tview.NewTableCell(key).SetExpansion(1))
 			a.tokensTable.SetCell(row, 1,
-				tview.NewTableCell(formatTokenCount(usage.InputTokens)).SetExpansion(1))
+				tview.NewTableCell(formatTokenCount(sa.InputTokens)).SetExpansion(1))
 			a.tokensTable.SetCell(row, 2,
-				tview.NewTableCell(formatTokenCount(usage.OutputTokens)).SetExpansion(1))
+				tview.NewTableCell(formatTokenCount(sa.OutputTokens)).SetExpansion(1))
 			row++
 		}
 	})

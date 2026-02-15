@@ -29,6 +29,15 @@ import (
 	"github.com/sipeed/picoclaw/pkg/utils"
 )
 
+// ActivityEvent represents a change in agent processing state for a session.
+type ActivityEvent struct {
+	SessionKey string
+	Type       string // "processing", "tool_call", "idle"
+	ToolName   string // populated when Type == "tool_call"
+	Preview    string // truncated response, populated when Type == "idle"
+	Iterations int    // total iterations so far, populated when Type == "idle"
+}
+
 type AgentLoop struct {
 	bus            *bus.MessageBus
 	provider       providers.LLMProvider
@@ -42,6 +51,8 @@ type AgentLoop struct {
 	tools          *tools.ToolRegistry
 	running        atomic.Bool
 	summarizing    sync.Map // Tracks which sessions are currently being summarized
+	onTokenUsage   func(sessionKey string, promptTokens, completionTokens int)
+	onActivity     func(event ActivityEvent)
 }
 
 // processOptions configures how a message is processed
@@ -147,6 +158,14 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 		tools:          toolsRegistry,
 		summarizing:    sync.Map{},
 	}
+}
+
+func (al *AgentLoop) SetOnTokenUsage(fn func(sessionKey string, promptTokens, completionTokens int)) {
+	al.onTokenUsage = fn
+}
+
+func (al *AgentLoop) SetOnActivity(fn func(event ActivityEvent)) {
+	al.onActivity = fn
 }
 
 func (al *AgentLoop) Run(ctx context.Context) error {
@@ -341,6 +360,11 @@ func (al *AgentLoop) runAgentLoop(ctx context.Context, opts processOptions) (str
 		}
 	}
 
+	// 0b. Emit processing activity event
+	if al.onActivity != nil {
+		al.onActivity(ActivityEvent{SessionKey: opts.SessionKey, Type: "processing"})
+	}
+
 	// 1. Update tool contexts
 	al.updateToolContexts(opts.Channel, opts.ChatID)
 
@@ -404,6 +428,16 @@ func (al *AgentLoop) runAgentLoop(ctx context.Context, opts processOptions) (str
 			"final_length": len(finalContent),
 		})
 
+	// 10. Emit idle activity event
+	if al.onActivity != nil {
+		al.onActivity(ActivityEvent{
+			SessionKey: opts.SessionKey,
+			Type:       "idle",
+			Preview:    responsePreview,
+			Iterations: iteration,
+		})
+	}
+
 	return finalContent, nil
 }
 
@@ -460,6 +494,11 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.M
 			return "", iteration, fmt.Errorf("LLM call failed: %w", err)
 		}
 
+		// Report token usage
+		if response.Usage != nil && al.onTokenUsage != nil {
+			al.onTokenUsage(opts.SessionKey, response.Usage.PromptTokens, response.Usage.CompletionTokens)
+		}
+
 		// Check if no tool calls - we're done
 		if len(response.ToolCalls) == 0 {
 			finalContent = response.Content
@@ -491,8 +530,10 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.M
 		for _, tc := range response.ToolCalls {
 			argumentsJSON, _ := json.Marshal(tc.Arguments)
 			assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, providers.ToolCall{
-				ID:   tc.ID,
-				Type: "function",
+				ID:        tc.ID,
+				Type:      "function",
+				Name:      tc.Name,
+				Arguments: tc.Arguments,
 				Function: &providers.FunctionCall{
 					Name:      tc.Name,
 					Arguments: string(argumentsJSON),
@@ -506,6 +547,15 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.M
 
 		// Execute tool calls
 		for _, tc := range response.ToolCalls {
+			// Emit tool_call activity event
+			if al.onActivity != nil {
+				al.onActivity(ActivityEvent{
+					SessionKey: opts.SessionKey,
+					Type:       "tool_call",
+					ToolName:   tc.Name,
+				})
+			}
+
 			// Log tool call with arguments preview
 			argsJSON, _ := json.Marshal(tc.Arguments)
 			argsPreview := utils.Truncate(string(argsJSON), 200)

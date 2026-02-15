@@ -16,7 +16,7 @@ type App struct {
 
 	// Panels
 	chatHistory   *tview.TextView
-	chatInput     *tview.InputField
+	chatInput     *tview.TextArea
 	logsView      *tview.TextView
 	channelsTable *tview.Table
 	tokensTable   *tview.Table
@@ -28,13 +28,24 @@ type App struct {
 	panels     []tview.Primitive
 	focusIndex int
 
+	// Focus mode (lazygit-style layout)
+	focusMode     bool
+	normalLayout  *tview.Flex
+	focusLayout   *tview.Flex
+	focusFiles    *tview.List
+	focusBranches *tview.List
+	focusCommits  *tview.List
+	focusDiff     *tview.TextView
+	focusSpec     *tview.TextView
+	isProjectMode bool
+
 	// Core dependencies
-	config         *config.Config
-	msgBus         *bus.MessageBus
-	channelManager *channels.Manager
-	tuiChannel     *TUIChannel
-	logWriter      *LogWriter
-	tokenTracker   *TokenTracker
+	config          *config.Config
+	msgBus          *bus.MessageBus
+	channelManager  *channels.Manager
+	tuiChannel      *TUIChannel
+	logWriter       *LogWriter
+	activityTracker *ActivityTracker
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -44,16 +55,20 @@ func NewApp(cfg *config.Config, msgBus *bus.MessageBus, version string) *App {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	app := &App{
-		tviewApp:     tview.NewApplication(),
-		version:      version,
-		config:       cfg,
-		msgBus:       msgBus,
-		tokenTracker: NewTokenTracker(),
-		ctx:          ctx,
-		cancel:       cancel,
+		tviewApp:        tview.NewApplication(),
+		version:         version,
+		config:          cfg,
+		msgBus:          msgBus,
+		activityTracker: NewActivityTracker(),
+		ctx:             ctx,
+		cancel:          cancel,
 	}
 
 	return app
+}
+
+func (a *App) SetProjectMode(enabled bool) {
+	a.isProjectMode = enabled
 }
 
 func (a *App) Init() {
@@ -65,6 +80,14 @@ func (a *App) Init() {
 
 	// Build layout (this calls build* methods for each panel)
 	layout := a.buildLayout()
+	a.normalLayout = layout
+
+	// Build focus mode panels (lazy, not visible yet)
+	a.focusFiles = a.buildFocusFilesPanel()
+	a.focusBranches = a.buildFocusBranchesPanel()
+	a.focusCommits = a.buildFocusCommitsPanel()
+	a.focusDiff = a.buildFocusDiffPanel()
+	a.focusSpec = a.buildFocusSpecPanel()
 
 	// Setup keybindings (needs panels to be created)
 	a.setupKeybindings()
@@ -86,14 +109,15 @@ func (a *App) GetTUIChannel() *TUIChannel {
 	return a.tuiChannel
 }
 
-func (a *App) GetTokenTracker() *TokenTracker {
-	return a.tokenTracker
+func (a *App) GetActivityTracker() *ActivityTracker {
+	return a.activityTracker
 }
 
 func (a *App) StartBackgroundTasks() {
 	a.startChannelsRefresh(a.ctx)
 	a.startSessionsRefresh(a.ctx)
 	a.startTokensRefresh(a.ctx)
+	a.startFocusRefresh(a.ctx)
 }
 
 func (a *App) Run() error {

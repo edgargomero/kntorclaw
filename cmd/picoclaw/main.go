@@ -14,6 +14,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -696,11 +697,25 @@ func tuiCmd() {
 		os.Exit(1)
 	}
 
+	// Detect project mode: if cwd is a git repo, use it as workspace
+	isProjectMode := false
+	cwd, _ := os.Getwd()
+	gitTopCmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	gitTopCmd.Dir = cwd
+	if out, err := gitTopCmd.Output(); err == nil {
+		projectRoot := strings.TrimSpace(string(out))
+		cfg.Agents.Defaults.Workspace = projectRoot
+		cfg.Agents.Defaults.RestrictToWorkspace = false
+		isProjectMode = true
+		logger.InfoC("tui", "Project mode: "+projectRoot)
+	}
+
 	msgBus := bus.NewMessageBus()
 
 	// Create TUI app FIRST and redirect logs before any other initialization,
 	// so that all log output goes to the TUI logs panel instead of corrupting the screen.
 	tuiApp := tui.NewApp(cfg, msgBus, version)
+	tuiApp.SetProjectMode(isProjectMode)
 	tuiApp.Init()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -715,6 +730,22 @@ func tuiCmd() {
 		}
 
 		agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
+
+		// Wire activity and token tracking to TUI
+		activityTracker := tuiApp.GetActivityTracker()
+		agentLoop.SetOnActivity(func(event agent.ActivityEvent) {
+			switch event.Type {
+			case "processing":
+				activityTracker.SetProcessing(event.SessionKey)
+			case "tool_call":
+				activityTracker.SetToolCall(event.SessionKey, event.ToolName)
+			case "idle":
+				activityTracker.SetIdle(event.SessionKey, event.Preview, event.Iterations)
+			}
+		})
+		agentLoop.SetOnTokenUsage(func(sessionKey string, prompt, completion int) {
+			activityTracker.AddTokens(sessionKey, prompt, completion)
+		})
 
 		cronService := setupCronTool(agentLoop, msgBus, cfg.WorkspacePath())
 
