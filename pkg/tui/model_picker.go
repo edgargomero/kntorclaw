@@ -62,6 +62,12 @@ func (a *App) showModelPicker() {
 	if _, ok := seen[currentModel]; !ok {
 		seen[currentModel] = ""
 	}
+	// Add known models from configured providers
+	for _, m := range a.getKnownModels() {
+		if _, ok := seen[m]; !ok {
+			seen[m] = ""
+		}
+	}
 
 	var entries []entry
 	for modelID, alias := range seen {
@@ -122,9 +128,13 @@ func (a *App) showModelPicker() {
 
 	// Save previous root to restore on close
 	previousRoot := a.tviewApp.GetFocus()
+	a.modalOpen = true
 
 	closePicker := func() {
-		if a.focusMode {
+		a.modalOpen = false
+		if a.configMode {
+			a.tviewApp.SetRoot(a.configLayout, true)
+		} else if a.focusMode {
 			a.tviewApp.SetRoot(a.focusLayout, true)
 		} else {
 			a.tviewApp.SetRoot(a.normalLayout, true)
@@ -153,8 +163,15 @@ func (a *App) showModelPicker() {
 					a.modelRouter.SetSessionModel("tui:local", selected)
 				case scopeChannel:
 					a.modelRouter.SetChannelModel("tui", selected)
+					if a.config.Agents.Models == nil {
+						a.config.Agents.Models = make(map[string]string)
+					}
+					a.config.Agents.Models["tui"] = selected
+					a.saveConfig()
 				case scopeDefault:
 					a.modelRouter.SetDefaultModel(selected)
+					a.config.Agents.Defaults.Model = selected
+					a.saveConfig()
 				}
 				a.renderConfig()
 			}
@@ -167,6 +184,9 @@ func (a *App) showModelPicker() {
 	// Show the modal by setting it as root with a pages overlay
 	pages := tview.NewPages().
 		AddPage("background", func() tview.Primitive {
+			if a.configMode {
+				return a.configLayout
+			}
 			if a.focusMode {
 				return a.focusLayout
 			}

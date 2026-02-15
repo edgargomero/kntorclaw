@@ -6,28 +6,27 @@ import (
 )
 
 func (a *App) buildLayout() *tview.Flex {
-	// Left column: Chat (60%) + Logs (40%)
+	// Left column: Chat + Input (50%)
 	leftColumn := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(a.buildChatPanel(), 0, 6, true).
-		AddItem(a.buildLogsPanel(), 0, 4, false)
+		AddItem(a.buildChatPanel(), 0, 1, true).
+		AddItem(a.chatInput, 3, 0, false)
 
-	// Right column: Channels (25%) + Tokens (25%) + Sessions (25%) + Config (25%)
+	// Right column: Channels + Tokens + Sessions + Logs (50%)
 	rightColumn := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(a.buildChannelsPanel(), 0, 1, false).
 		AddItem(a.buildTokensPanel(), 0, 1, false).
 		AddItem(a.buildSessionsPanel(), 0, 1, false).
-		AddItem(a.buildConfigPanel(), 0, 1, false)
+		AddItem(a.buildLogsPanel(), 0, 1, false)
 
-	// Main content: Left (55%) + Right (45%)
+	// Main content: Left (50%) + Right (50%)
 	content := tview.NewFlex().
-		AddItem(leftColumn, 0, 55, true).
-		AddItem(rightColumn, 0, 45, false)
+		AddItem(leftColumn, 0, 1, true).
+		AddItem(rightColumn, 0, 1, false)
 
-	// Full layout: Header + Content + Input
+	// Full layout: Header + Content
 	layout := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(a.buildHeader(), 1, 0, false).
-		AddItem(content, 0, 1, true).
-		AddItem(a.chatInput, 3, 0, false)
+		AddItem(content, 0, 1, true)
 
 	return layout
 }
@@ -46,10 +45,12 @@ func (a *App) updateStatusBar() {
 	if a.isProjectMode {
 		projectIndicator = " [black:green] PROJECT [-:-] "
 	}
-	if a.focusMode {
+	if a.configMode {
+		a.statusBar.SetText(" PicoClaw " + a.version + projectIndicator + " [black:cyan] CONFIG MODE [-:-]  [yellow]Tab[-] switch panel  [yellow]Enter[-] select  [yellow]d[-] delete  [yellow]Esc[-] back  [yellow]F8[-] exit  [yellow]Ctrl+C[-] quit")
+	} else if a.focusMode {
 		a.statusBar.SetText(" PicoClaw " + a.version + projectIndicator + " [black:yellow] FOCUS MODE [-:-]  [yellow]F1[white]-Files [yellow]F2[white]-Branches [yellow]F3[white]-Commits [yellow]F4[white]-Chat [yellow]F5[white]-Diff [yellow]F6[white]-QA  [yellow]F9[white] exit  [yellow]Esc[white] input  [yellow]Ctrl+C[white] quit")
 	} else {
-		a.statusBar.SetText(" PicoClaw " + a.version + projectIndicator + " [yellow]F1[white]-Chat [yellow]F2[white]-Logs [yellow]F3[white]-Channels [yellow]F4[white]-Tokens [yellow]F5[white]-Sessions [yellow]F6[white]-Config  [yellow]F9[white] focus  [yellow]Tab[white]/[yellow]Shift+Tab[white] navigate  [yellow]Shift+Enter[white] newline  [yellow]Ctrl+C[white] quit")
+		a.statusBar.SetText(" PicoClaw " + a.version + projectIndicator + " [yellow]F1[white]-Chat [yellow]F2[white]-Logs [yellow]F3[white]-Channels [yellow]F4[white]-Tokens [yellow]F5[white]-Sessions  [yellow]F8[white] config  [yellow]F9[white] focus  [yellow]Tab[white]/[yellow]Shift+Tab[white] navigate  [yellow]Ctrl+C[white] quit")
 	}
 }
 
@@ -90,7 +91,6 @@ func (a *App) toggleFocusMode() {
 			a.channelsTable,
 			a.tokensTable,
 			a.sessionsTable,
-			a.configView,
 		}
 		a.focusIndex = 0
 		a.updateStatusBar()

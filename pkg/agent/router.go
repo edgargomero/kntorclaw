@@ -125,3 +125,35 @@ func (r *ModelRouter) DefaultModel() string {
 	defer r.mu.RUnlock()
 	return r.defaultModel
 }
+
+// GetChannelModels returns a copy of the channel models map.
+func (r *ModelRouter) GetChannelModels() map[string]string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	cp := make(map[string]string, len(r.channelModels))
+	for k, v := range r.channelModels {
+		cp[k] = v
+	}
+	return cp
+}
+
+// SetAlias adds or updates an alias mapping.
+func (r *ModelRouter) SetAlias(alias, modelID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.aliases[alias] = modelID
+}
+
+// DeleteAlias removes an alias.
+func (r *ModelRouter) DeleteAlias(alias string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.aliases, alias)
+}
+
+// DeleteChannelModel removes a channel model override.
+func (r *ModelRouter) DeleteChannelModel(channel string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.channelModels, channel)
+}

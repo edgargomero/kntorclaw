@@ -399,11 +399,7 @@ func agentCmd() {
 		os.Exit(1)
 	}
 
-	provider, err := providers.CreateProvider(cfg)
-	if err != nil {
-		fmt.Printf("Error creating provider: %v\n", err)
-		os.Exit(1)
-	}
+	provider := providers.NewMultiProvider(cfg)
 
 	msgBus := bus.NewMessageBus()
 	agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
@@ -538,11 +534,7 @@ func gatewayCmd() {
 		os.Exit(1)
 	}
 
-	provider, err := providers.CreateProvider(cfg)
-	if err != nil {
-		fmt.Printf("Error creating provider: %v\n", err)
-		os.Exit(1)
-	}
+	provider := providers.NewMultiProvider(cfg)
 
 	msgBus := bus.NewMessageBus()
 	agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
@@ -726,6 +718,7 @@ func tuiCmd() {
 	// Create TUI app FIRST and redirect logs before any other initialization,
 	// so that all log output goes to the TUI logs panel instead of corrupting the screen.
 	tuiApp := tui.NewApp(cfg, msgBus, version)
+	tuiApp.SetConfigPath(getConfigPath())
 	tuiApp.SetModelRouter(tuiRouter)
 	tuiApp.SetProjectMode(isProjectMode)
 	tuiApp.Init()
@@ -735,11 +728,7 @@ func tuiCmd() {
 	// Start all services in a goroutine so tview.Run() can take control of the terminal.
 	// All log output from service initialization will appear in the TUI logs panel.
 	go func() {
-		provider, err := providers.CreateProvider(cfg)
-		if err != nil {
-			logger.ErrorCF("tui", "Failed to create provider", map[string]interface{}{"error": err.Error()})
-			return
-		}
+		provider := providers.NewMultiProvider(cfg)
 
 		agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
 		agentLoop.SetRouter(tuiRouter)

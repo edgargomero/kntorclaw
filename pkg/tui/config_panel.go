@@ -2,13 +2,14 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/rivo/tview"
 	"github.com/sipeed/picoclaw/pkg/config"
 )
 
 func (a *App) buildConfigPanel() *tview.TextView {
-	a.configView = newPanel("CONFIG [F6]")
+	a.configView = newPanel("CONFIG [F8]")
 	a.renderConfig()
 	return a.configView
 }
@@ -35,6 +36,54 @@ func (a *App) renderConfig() {
 
 	if cfg.Devices.Enabled {
 		fmt.Fprintf(a.configView, "[yellow]Devices:[white] enabled\n")
+	}
+
+	fmt.Fprintf(a.configView, "\n[yellow::b][[]F8[-::-] open config editor\n")
+
+	// Channel Models
+	fmt.Fprintf(a.configView, "\n[blue::b]Channel Models[-::-]\n")
+	if a.modelRouter != nil {
+		channelModels := a.modelRouter.GetChannelModels()
+		if len(channelModels) > 0 {
+			keys := make([]string, 0, len(channelModels))
+			for k := range channelModels {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, ch := range keys {
+				fmt.Fprintf(a.configView, "  [green]%s[white] → %s\n", ch, channelModels[ch])
+			}
+		} else {
+			fmt.Fprintf(a.configView, "  [gray](none)[-]\n")
+		}
+	}
+
+	// Aliases
+	fmt.Fprintf(a.configView, "\n[blue::b]Aliases[-::-]\n")
+	if a.modelRouter != nil {
+		aliases := a.modelRouter.GetAliases()
+		if len(aliases) > 0 {
+			keys := make([]string, 0, len(aliases))
+			for k := range aliases {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, alias := range keys {
+				fmt.Fprintf(a.configView, "  [green]%s[white] → %s\n", alias, aliases[alias])
+			}
+		} else {
+			fmt.Fprintf(a.configView, "  [gray](none)[-]\n")
+		}
+	}
+
+	// Providers
+	fmt.Fprintf(a.configView, "\n[blue::b]Providers[-::-]\n")
+	for _, p := range a.getProviderList() {
+		if p.hasKey {
+			fmt.Fprintf(a.configView, "  [green]%-15s[white] configured\n", p.name)
+		} else {
+			fmt.Fprintf(a.configView, "  [gray]%-15s[red] not set[-]\n", p.name)
+		}
 	}
 }
 

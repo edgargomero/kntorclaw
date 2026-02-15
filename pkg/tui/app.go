@@ -41,8 +41,17 @@ type App struct {
 	qaTracker     *QATracker
 	isProjectMode bool
 
+	// Config mode (F8 interactive view)
+	configMode     bool
+	configLayout   *tview.Flex
+	configSections *tview.List
+	configItems    *tview.List
+	configInfo     *tview.TextView
+
 	// Model routing
 	modelRouter *agent.ModelRouter
+	configPath  string
+	modalOpen   bool
 
 	// Core dependencies
 	config          *config.Config
@@ -79,6 +88,7 @@ func (a *App) SetProjectMode(enabled bool) {
 func (a *App) Init() {
 	// Build all panels (order matters: chat builds chatInput used by layout)
 	a.logsView = newPanel("LOGS [F2]")
+	a.buildConfigPanel() // config not in layout, used by renderConfig + config mode
 
 	// Create TUI channel immediately so chat works as soon as tview starts
 	a.tuiChannel = NewTUIChannel(a.msgBus, a)
@@ -94,6 +104,9 @@ func (a *App) Init() {
 	a.focusDiff = a.buildFocusDiffPanel()
 	a.focusQA = a.buildFocusQAPanel()
 
+	// Build config mode panels (F8 interactive view)
+	a.buildConfigViewPanels()
+
 	// Setup keybindings (needs panels to be created)
 	a.setupKeybindings()
 
@@ -104,6 +117,10 @@ func (a *App) Init() {
 
 	a.tviewApp.SetRoot(layout, true)
 	a.tviewApp.SetFocus(a.chatInput)
+}
+
+func (a *App) SetConfigPath(path string) {
+	a.configPath = path
 }
 
 func (a *App) SetModelRouter(router *agent.ModelRouter) {

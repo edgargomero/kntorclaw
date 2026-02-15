@@ -5,6 +5,15 @@ import (
 	"github.com/rivo/tview"
 )
 
+// Panel indices for normal mode
+const (
+	panelChatHistory = 0
+	panelLogs        = 1
+	panelChannels    = 2
+	panelTokens      = 3
+	panelSessions    = 4
+)
+
 func (a *App) setupKeybindings() {
 	a.panels = []tview.Primitive{
 		a.chatHistory,
@@ -12,23 +21,43 @@ func (a *App) setupKeybindings() {
 		a.channelsTable,
 		a.tokensTable,
 		a.sessionsTable,
-		a.configView,
 	}
 	a.focusIndex = 0
 
 	a.tviewApp.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		// F9 toggles focus mode
-		if event.Key() == tcell.KeyF9 {
+		// Skip global keybindings when a modal is open
+		if a.modalOpen {
+			return event
+		}
+
+		// Mode toggles (always available)
+		switch event.Key() {
+		case tcell.KeyF8:
+			if a.focusMode {
+				a.toggleFocusMode()
+			}
+			a.toggleConfigMode()
+			return nil
+		case tcell.KeyF9:
+			if a.configMode {
+				a.toggleConfigMode()
+			}
 			a.toggleFocusMode()
 			return nil
 		}
 
-		// Ctrl+M opens model picker
+		// Alt+M opens model picker (all modes)
 		if event.Key() == tcell.KeyRune && event.Rune() == 'm' && event.Modifiers()&tcell.ModAlt != 0 {
 			a.showModelPicker()
 			return nil
 		}
 
+		// Config mode: delegate all keys to config handler
+		if a.configMode {
+			return a.handleConfigModeKeys(event)
+		}
+
+		// Normal / Focus mode keybindings
 		switch event.Key() {
 		case tcell.KeyF1:
 			a.setFocus(0)
@@ -46,23 +75,16 @@ func (a *App) setupKeybindings() {
 			a.setFocus(4)
 			return nil
 		case tcell.KeyF6:
-			if a.focusMode {
-				a.setFocus(5) // QA panel in focus mode
-			} else {
-				a.setFocus(5) // Config in normal mode
-			}
+			a.setFocus(5) // QA panel in focus mode (no-op in normal mode)
 			return nil
 		case tcell.KeyEnter:
 			// Approve checkpoint when QA panel is focused and waiting
-			if a.focusMode && a.qaTracker != nil && a.qaTracker.WaitingApproval {
-				focused := a.tviewApp.GetFocus()
-				if focused == a.focusQA {
-					a.qaTracker.Approve()
-					a.tviewApp.QueueUpdateDraw(func() {
-						a.refreshQAPanel()
-					})
-					return nil
-				}
+			if a.focusMode && a.qaTracker != nil && a.qaTracker.WaitingApproval && a.focusIndex == 5 {
+				a.qaTracker.Approve()
+				a.tviewApp.QueueUpdateDraw(func() {
+					a.refreshQAPanel()
+				})
+				return nil
 			}
 		case tcell.KeyTab:
 			a.focusNext()
@@ -72,30 +94,20 @@ func (a *App) setupKeybindings() {
 			return nil
 		case tcell.KeyEsc:
 			// Reject checkpoint when QA panel is focused and waiting
-			if a.focusMode && a.qaTracker != nil && a.qaTracker.WaitingApproval {
-				focused := a.tviewApp.GetFocus()
-				if focused == a.focusQA {
-					a.qaTracker.Reject()
-					a.tviewApp.QueueUpdateDraw(func() {
-						a.refreshQAPanel()
-					})
-					return nil
-				}
+			if a.focusMode && a.qaTracker != nil && a.qaTracker.WaitingApproval && a.focusIndex == 5 {
+				a.qaTracker.Reject()
+				a.tviewApp.QueueUpdateDraw(func() {
+					a.refreshQAPanel()
+				})
+				return nil
 			}
 			a.tviewApp.SetFocus(a.chatInput)
 			return nil
 		}
 
-		// If typing regular characters and not focused on input or a focus-mode list, redirect to input
+		// Redirect typing to chat input from read-only panels
 		if event.Key() == tcell.KeyRune && event.Modifiers() == 0 {
-			focused := a.tviewApp.GetFocus()
-			if focused != a.chatInput &&
-				focused != a.focusFiles &&
-				focused != a.focusBranches &&
-				focused != a.focusCommits &&
-				focused != a.focusQA {
-				a.tviewApp.SetFocus(a.chatInput)
-			}
+			a.tviewApp.SetFocus(a.chatInput)
 		}
 
 		return event

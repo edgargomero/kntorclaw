@@ -17,7 +17,15 @@
       "WebFetch(domain:deepwiki.com)",
       "Bash(head:*)",
       "Bash(export PATH=\"$PATH:/c/Program Files/Go/bin\")",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(/c/Users/edgar/go/bin/go build:*)",
+      "Bash(\"/c/Program Files/Go/bin/go\" vet ./pkg/tui/... ./pkg/tools/... ./pkg/agent/... ./cmd/picoclaw/...)",
+      "Bash(git push:*)",
+      "Bash(go generate:*)",
+      "Bash(grep:*)",
+      "Bash(export PATH=\"$PATH:/c/Program Files/Go/bin:/c/Users/edgar/go/bin\")",
+      "Bash(PATH=\"/c/Program Files/Go/bin:$PATH\" go build:*)",
+      "Bash(PATH=\"/c/Program Files/Go/bin:$PATH\" make build:*)"
     ],
     "additionalDirectories": [
       "\\Users\\edgar\\dev\\lazygit\\"

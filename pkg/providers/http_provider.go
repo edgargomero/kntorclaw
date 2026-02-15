@@ -222,8 +222,9 @@ func createCodexAuthProvider() (LLMProvider, error) {
 	return NewCodexProviderWithTokenSource(cred.AccessToken, cred.AccountID, createCodexTokenSource()), nil
 }
 
-func CreateProvider(cfg *config.Config) (LLMProvider, error) {
-	model := cfg.Agents.Defaults.Model
+// CreateProviderForModel creates an LLMProvider for a specific model name,
+// using the config to determine the correct provider and credentials.
+func CreateProviderForModel(cfg *config.Config, model string) (LLMProvider, error) {
 	providerName := strings.ToLower(cfg.Agents.Defaults.Provider)
 
 	var apiKey, apiBase, proxy string
@@ -433,4 +434,9 @@ func CreateProvider(cfg *config.Config) (LLMProvider, error) {
 	}
 
 	return NewHTTPProvider(apiKey, apiBase, proxy), nil
+}
+
+// CreateProvider creates an LLMProvider using the default model from config.
+func CreateProvider(cfg *config.Config) (LLMProvider, error) {
+	return CreateProviderForModel(cfg, cfg.Agents.Defaults.Model)
 }
