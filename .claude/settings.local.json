@@ -9,7 +9,18 @@
       "Bash(npm view:*)",
       "WebSearch",
       "WebFetch(domain:github.com)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(go get:*)",
+      "Bash(cmd.exe /c \"go vet ./pkg/tui/...\")",
+      "Bash(go build:*)",
+      "Bash(git commit:*)",
+      "WebFetch(domain:deepwiki.com)",
+      "Bash(head:*)",
+      "Bash(export PATH=\"$PATH:/c/Program Files/Go/bin\")",
+      "Bash(git add:*)"
+    ],
+    "additionalDirectories": [
+      "\\Users\\edgar\\dev\\lazygit\\"
     ]
   }
 }
