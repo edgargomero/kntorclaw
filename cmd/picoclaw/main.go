@@ -775,7 +775,7 @@ func tuiCmd() {
 			activityTracker.AddTokens(sessionKey, prompt, completion)
 		})
 
-		cronService := setupCronTool(agentLoop, msgBus, cfg.WorkspacePath())
+		cronService := setupCronTool(agentLoop, msgBus, cfg.WorkspacePath(), false)
 
 		heartbeatService := heartbeat.NewHeartbeatService(
 			cfg.WorkspacePath(),
