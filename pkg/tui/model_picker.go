@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"log"
 	"sort"
 
 	"github.com/gdamore/tcell/v2"
@@ -53,6 +54,7 @@ func (a *App) showModelPicker() {
 	scope := scopeSession
 	channels := a.getActiveChannels()
 	channelIdx := 0 // start on "tui"
+	log.Printf("[model-picker] Available channels: %v", channels)
 
 	targetChannel := func() string { return channels[channelIdx] }
 	targetSession := func() string {
@@ -192,6 +194,7 @@ func (a *App) showModelPicker() {
 
 	switchChannel := func(delta int) {
 		channelIdx = (channelIdx + delta + len(channels)) % len(channels)
+		log.Printf("[model-picker] Switched to channel: %s (idx=%d)", targetChannel(), channelIdx)
 		entries, currentModel, currentSource = buildEntries()
 		_ = currentSource // used in footer via closure
 		populateList()
@@ -222,10 +225,12 @@ func (a *App) showModelPicker() {
 				ch := targetChannel()
 				sess := targetSession()
 				var needSave bool
+				log.Printf("[model-picker] Applying model=%s channel=%s scope=%s session=%s", selected, ch, scope, sess)
 				switch scope {
 				case scopeSession:
 					if sess != "" {
 						a.modelRouter.SetSessionModel(sess, selected)
+						log.Printf("[model-picker] Set session model: %s → %s", sess, selected)
 					} else {
 						// For non-TUI channels, apply as channel override
 						a.modelRouter.SetChannelModel(ch, selected)
@@ -236,6 +241,7 @@ func (a *App) showModelPicker() {
 						a.config.Agents.Models[ch] = selected
 						a.config.Unlock()
 						needSave = true
+						log.Printf("[model-picker] Set channel model (from session scope): %s → %s", ch, selected)
 					}
 				case scopeChannel:
 					a.modelRouter.SetChannelModel(ch, selected)
@@ -246,12 +252,14 @@ func (a *App) showModelPicker() {
 					a.config.Agents.Models[ch] = selected
 					a.config.Unlock()
 					needSave = true
+					log.Printf("[model-picker] Set channel model: %s → %s", ch, selected)
 				case scopeDefault:
 					a.modelRouter.SetDefaultModel(selected)
 					a.config.Lock()
 					a.config.Agents.Defaults.Model = selected
 					a.config.Unlock()
 					needSave = true
+					log.Printf("[model-picker] Set default model: %s", selected)
 				}
 				closePicker()
 				if needSave {

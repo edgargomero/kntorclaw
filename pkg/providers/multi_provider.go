@@ -130,7 +130,7 @@ func ResolveProviderKey(cfg *config.Config, model string) string {
 			return "groq"
 		}
 
-	case strings.Contains(lowerModel, "nvidia") || strings.HasPrefix(model, "nvidia/"):
+	case strings.Contains(lowerModel, "nvidia") || strings.HasPrefix(model, "nvidia/") || strings.HasPrefix(model, "z-ai/"):
 		if cfg.Providers.Nvidia.APIKey != "" {
 			return "nvidia"
 		}
@@ -150,7 +150,7 @@ func ResolveProviderKey(cfg *config.Config, model string) string {
 // hasRoutingPrefix returns true if the model name has a provider-routing prefix
 // like "anthropic/", "openai/", etc.
 func hasRoutingPrefix(model string) bool {
-	prefixes := []string{"anthropic/", "openai/", "openrouter/", "meta-llama/", "deepseek/", "google/", "moonshot/", "nvidia/", "groq/"}
+	prefixes := []string{"anthropic/", "openai/", "openrouter/", "meta-llama/", "deepseek/", "google/", "moonshot/", "nvidia/", "groq/", "z-ai/"}
 	for _, p := range prefixes {
 		if strings.HasPrefix(model, p) {
 			return true
