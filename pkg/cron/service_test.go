@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -451,5 +452,32 @@ func TestConcurrentAddAndList(t *testing.T) {
 	jobs := cs.ListJobs(true)
 	if len(jobs) != n {
 		t.Errorf("expected %d jobs after concurrent adds, got %d", n, len(jobs))
+	}
+}
+
+func TestSaveStore_FilePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file permission bits are not enforced on Windows")
+	}
+
+	tmpDir := t.TempDir()
+	storePath := filepath.Join(tmpDir, "cron", "jobs.json")
+
+	cs := NewCronService(storePath, nil)
+
+	everyMS := int64(60000)
+	_, err := cs.AddJob("test", CronSchedule{Kind: "every", EveryMS: &everyMS}, "hello", false, "cli", "direct")
+	if err != nil {
+		t.Fatalf("AddJob failed: %v", err)
+	}
+
+	info, err := os.Stat(storePath)
+	if err != nil {
+		t.Fatalf("Stat failed: %v", err)
+	}
+
+	perm := info.Mode().Perm()
+	if perm != 0600 {
+		t.Errorf("cron store has permission %04o, want 0600", perm)
 	}
 }
