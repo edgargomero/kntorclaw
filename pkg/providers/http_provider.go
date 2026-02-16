@@ -244,6 +244,9 @@ func CreateProviderForModel(cfg *config.Config, model string) (LLMProvider, erro
 			}
 		case "openai", "gpt":
 			if cfg.Providers.OpenAI.APIKey != "" || cfg.Providers.OpenAI.AuthMethod != "" {
+				if cfg.Providers.OpenAI.AuthMethod == "codex-cli" {
+					return NewCodexProviderWithTokenSource("", "", CreateCodexCliTokenSource()), nil
+				}
 				if cfg.Providers.OpenAI.AuthMethod == "oauth" || cfg.Providers.OpenAI.AuthMethod == "token" {
 					return createCodexAuthProvider()
 				}
@@ -303,11 +306,17 @@ func CreateProviderForModel(cfg *config.Config, model string) (LLMProvider, erro
 				}
 			}
 		case "claude-cli", "claudecode", "claude-code":
-			workspace := cfg.Agents.Defaults.Workspace
+			workspace := cfg.WorkspacePath()
 			if workspace == "" {
 				workspace = "."
 			}
 			return NewClaudeCliProvider(workspace), nil
+		case "codex-cli", "codex-code":
+			workspace := cfg.WorkspacePath()
+			if workspace == "" {
+				workspace = "."
+			}
+			return NewCodexCliProvider(workspace), nil
 		case "deepseek":
 			if cfg.Providers.DeepSeek.APIKey != "" {
 				apiKey = cfg.Providers.DeepSeek.APIKey
