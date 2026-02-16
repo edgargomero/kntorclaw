@@ -59,6 +59,53 @@ Default workspace (`workspace/`) is embedded into the binary at build time via `
 
 Primary config: `~/.picoclaw/config.json` (see `config/config.example.json`). All values overridable via `PICOCLAW_*` env vars. Key sections: `agents.defaults`, `channels`, `providers`, `tools.web`, `heartbeat`, `devices`, `gateway`.
 
+### Model Routing
+
+The `ModelRouter` (`pkg/agent/router.go`) resolves which LLM model to use with a 3-layer priority:
+
+1. **Session override** — runtime only, set via model picker (scope: session)
+2. **Channel override** — persisted in `config.json` under `agents.models` (e.g. `"whatsapp": "claude-sonnet-4-5-20250929"`)
+3. **Default model** — `agents.defaults.model` fallback
+
+The `MultiProvider` (`pkg/providers/multi_provider.go`) auto-dispatches to the correct provider based on model name patterns (`claude*` → Anthropic, `gpt*` → OpenAI, etc.).
+
+### Token Usage Persistence
+
+The `ActivityTracker` (`pkg/tui/activity.go`) tracks per-session token usage in memory and persists historical totals to `~/.picoclaw/token_usage.json`. The TOKENS panel shows both session counts (In/Out) and cumulative totals (ΣIn/ΣOut).
+
+### TUI Architecture (`pkg/tui/`)
+
+Three layout modes switchable via keybindings:
+
+| Mode | Toggle | Layout |
+|------|--------|--------|
+| Normal | default | Chat+Input (50%) \| Channels+Tokens+Sessions+Logs (50%) |
+| Config | F8 | Sections list (25ch) \| Items list + footer |
+| Focus | F9 | Files+Branches+Commits+QA (30%) \| Chat+Diff (70%) |
+
+Key TUI files:
+
+| File | Purpose |
+|------|---------|
+| `app.go` | App struct, Init(), lifecycle |
+| `layout.go` | Panel layout, status bar, toast messages |
+| `keybindings.go` | Global input capture, help screen (`?`), error viewer (Ctrl+E) |
+| `model_picker.go` | Multi-channel model picker (Alt+M) with scope selection |
+| `config_view.go` | F8 interactive config: sections/items navigation, delete confirmation |
+| `config_editor.go` | Modal editors for providers, models, channels, aliases |
+| `tokens.go` | TOKENS panel with session + historical totals |
+| `sessions.go` | SESSIONS panel with live activity tracking |
+| `channels_panel.go` | CHANNELS panel with online/offline status |
+| `error_tracker.go` | Error aggregation with badge + persistent log |
+| `activity.go` | ActivityTracker with in-memory + JSON persistence |
+
+TUI keybindings (also available via `?` help screen):
+
+- **Normal**: F1-F5 panels, Tab/Shift+Tab navigate, F8 config, F9 focus, Alt+M model picker, Ctrl+E errors, `?` help
+- **Config**: Tab switch panel, Enter select, `d` delete (with y/n confirm), Esc back
+- **Focus**: F1-F6 panels, Enter/Esc approve/reject QA checkpoints
+- **Model Picker**: ←/→ switch channel, Tab cycle scope (session/channel/default), Enter apply
+
 ## Relationship to OpenClaw
 
 The sibling repo at `../openclaw` is the TypeScript/Swift/Kotlin multi-platform version. PicoClaw reimplements the same agent concept as a single Go binary for constrained environments. The `pkg/migrate` package handles migration from OpenClaw configs/workspaces.

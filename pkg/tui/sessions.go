@@ -54,6 +54,9 @@ func (a *App) startSessionsRefresh(ctx context.Context) {
 }
 
 func (a *App) refreshSessions() {
+	if a.configBusy.Load() {
+		return
+	}
 	// Gather disk sessions
 	sessionsDir := filepath.Join(a.config.WorkspacePath(), "sessions")
 	entries, _ := os.ReadDir(sessionsDir)

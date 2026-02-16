@@ -43,6 +43,9 @@ func (a *App) startChannelsRefresh(ctx context.Context) {
 }
 
 func (a *App) refreshChannels() {
+	if a.configBusy.Load() {
+		return
+	}
 	if a.channelManager == nil {
 		return
 	}

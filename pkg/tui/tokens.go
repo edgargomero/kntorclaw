@@ -17,7 +17,7 @@ func (a *App) buildTokensPanel() *tview.Table {
 }
 
 func (a *App) setTokensHeader() {
-	headers := []string{"Session", "In", "Out"}
+	headers := []string{"Session", "In", "Out", "ΣIn", "ΣOut"}
 	for i, h := range headers {
 		cell := tview.NewTableCell(h).
 			SetTextColor(tcell.ColorYellow).
@@ -44,7 +44,11 @@ func (a *App) startTokensRefresh(ctx context.Context) {
 }
 
 func (a *App) refreshTokens() {
+	if a.configBusy.Load() {
+		return
+	}
 	all := a.activityTracker.GetAll()
+	totals := a.activityTracker.GetTotals()
 
 	a.tviewApp.QueueUpdateDraw(func() {
 		rowCount := a.tokensTable.GetRowCount()
@@ -52,23 +56,48 @@ func (a *App) refreshTokens() {
 			a.tokensTable.RemoveRow(r)
 		}
 
-		row := 1
-		keys := make([]string, 0, len(all))
-		for k := range all {
-			if all[k].InputTokens > 0 || all[k].OutputTokens > 0 {
-				keys = append(keys, k)
+		// Collect keys from both session and historical totals
+		keySet := make(map[string]struct{})
+		for k, sa := range all {
+			if sa.InputTokens > 0 || sa.OutputTokens > 0 {
+				keySet[k] = struct{}{}
 			}
+		}
+		for k, tt := range totals {
+			if tt.InputTokens > 0 || tt.OutputTokens > 0 {
+				keySet[k] = struct{}{}
+			}
+		}
+		keys := make([]string, 0, len(keySet))
+		for k := range keySet {
+			keys = append(keys, k)
 		}
 		sort.Strings(keys)
 
+		row := 1
 		for _, key := range keys {
 			sa := all[key]
+			tt := totals[key]
+			var inTok, outTok int
+			if sa != nil {
+				inTok = sa.InputTokens
+				outTok = sa.OutputTokens
+			}
+			var totalIn, totalOut int
+			if tt != nil {
+				totalIn = tt.InputTokens
+				totalOut = tt.OutputTokens
+			}
 			a.tokensTable.SetCell(row, 0,
 				tview.NewTableCell(key).SetExpansion(1))
 			a.tokensTable.SetCell(row, 1,
-				tview.NewTableCell(formatTokenCount(sa.InputTokens)).SetExpansion(1))
+				tview.NewTableCell(formatTokenCount(inTok)).SetExpansion(1))
 			a.tokensTable.SetCell(row, 2,
-				tview.NewTableCell(formatTokenCount(sa.OutputTokens)).SetExpansion(1))
+				tview.NewTableCell(formatTokenCount(outTok)).SetExpansion(1))
+			a.tokensTable.SetCell(row, 3,
+				tview.NewTableCell(formatTokenCount(totalIn)).SetExpansion(1))
+			a.tokensTable.SetCell(row, 4,
+				tview.NewTableCell(formatTokenCount(totalOut)).SetExpansion(1))
 			row++
 		}
 	})

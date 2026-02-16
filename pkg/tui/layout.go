@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
@@ -40,17 +43,40 @@ func (a *App) buildHeader() *tview.TextView {
 	return a.statusBar
 }
 
+func (a *App) errorBadge() string {
+	if a.errorTracker == nil {
+		return ""
+	}
+	n := a.errorTracker.Count()
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" [white:red] ▲ %d errors [-:-] ", n)
+}
+
+// showToast displays a temporary message in the status bar that disappears after 3 seconds.
+func (a *App) showToast(msg string) {
+	a.statusBar.SetText(" " + msg)
+	go func() {
+		time.Sleep(3 * time.Second)
+		a.tviewApp.QueueUpdateDraw(func() {
+			a.updateStatusBar()
+		})
+	}()
+}
+
 func (a *App) updateStatusBar() {
 	projectIndicator := ""
 	if a.isProjectMode {
 		projectIndicator = " [black:green] PROJECT [-:-] "
 	}
+	badge := a.errorBadge()
 	if a.configMode {
-		a.statusBar.SetText(" PicoClaw " + a.version + projectIndicator + " [black:cyan] CONFIG MODE [-:-]  [yellow]Tab[-] switch panel  [yellow]Enter[-] select  [yellow]d[-] delete  [yellow]Esc[-] back  [yellow]F8[-] exit  [yellow]Ctrl+C[-] quit")
+		a.statusBar.SetText(" PicoClaw " + a.version + projectIndicator + badge + " [black:cyan] CONFIG MODE [-:-]  [yellow]Tab[-] switch panel  [yellow]Enter[-] select  [yellow]d[-] delete  [yellow]Esc[-] back  [yellow]F8[-] exit  [yellow]Ctrl+C[-] quit")
 	} else if a.focusMode {
-		a.statusBar.SetText(" PicoClaw " + a.version + projectIndicator + " [black:yellow] FOCUS MODE [-:-]  [yellow]F1[white]-Files [yellow]F2[white]-Branches [yellow]F3[white]-Commits [yellow]F4[white]-Chat [yellow]F5[white]-Diff [yellow]F6[white]-QA  [yellow]F9[white] exit  [yellow]Esc[white] input  [yellow]Ctrl+C[white] quit")
+		a.statusBar.SetText(" PicoClaw " + a.version + projectIndicator + badge + " [black:yellow] FOCUS MODE [-:-]  [yellow]F1[white]-Files [yellow]F2[white]-Branches [yellow]F3[white]-Commits [yellow]F4[white]-Chat [yellow]F5[white]-Diff [yellow]F6[white]-QA  [yellow]F9[white] exit  [yellow]Esc[white] input  [yellow]Ctrl+C[white] quit")
 	} else {
-		a.statusBar.SetText(" PicoClaw " + a.version + projectIndicator + " [yellow]F1[white]-Chat [yellow]F2[white]-Logs [yellow]F3[white]-Channels [yellow]F4[white]-Tokens [yellow]F5[white]-Sessions  [yellow]F8[white] config  [yellow]F9[white] focus  [yellow]Tab[white]/[yellow]Shift+Tab[white] navigate  [yellow]Ctrl+C[white] quit")
+		a.statusBar.SetText(" PicoClaw " + a.version + projectIndicator + badge + " [yellow]F1[white]-Chat [yellow]F2[white]-Logs [yellow]F3[white]-Channels [yellow]F4[white]-Tokens [yellow]F5[white]-Sessions  [yellow]F8[white] config  [yellow]F9[white] focus  [yellow]Tab[white]/[yellow]Shift+Tab[white] navigate  [yellow]Ctrl+C[white] quit")
 	}
 }
 

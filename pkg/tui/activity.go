@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"encoding/json"
+	"os"
 	"sync"
 	"time"
 )
@@ -17,15 +19,25 @@ type SessionActivity struct {
 	OutputTokens int
 }
 
+// TokenTotals holds cumulative historical token usage for a session key.
+type TokenTotals struct {
+	InputTokens  int       `json:"input_tokens"`
+	OutputTokens int       `json:"output_tokens"`
+	LastUpdated  time.Time `json:"last_updated"`
+}
+
 // ActivityTracker aggregates per-session runtime activity (status, tokens, tool calls).
 type ActivityTracker struct {
 	sessions map[string]*SessionActivity
+	totals   map[string]*TokenTotals
+	filePath string
 	mu       sync.RWMutex
 }
 
 func NewActivityTracker() *ActivityTracker {
 	return &ActivityTracker{
 		sessions: make(map[string]*SessionActivity),
+		totals:   make(map[string]*TokenTotals),
 	}
 }
 
@@ -69,13 +81,64 @@ func (t *ActivityTracker) SetIdle(sessionKey string, responsePreview string, ite
 	sa.LastActive = time.Now()
 }
 
-// AddTokens accumulates token usage for the session.
+// AddTokens accumulates token usage for the session and historical totals.
 func (t *ActivityTracker) AddTokens(sessionKey string, input, output int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	sa := t.getOrCreate(sessionKey)
 	sa.InputTokens += input
 	sa.OutputTokens += output
+
+	tt, ok := t.totals[sessionKey]
+	if !ok {
+		tt = &TokenTotals{}
+		t.totals[sessionKey] = tt
+	}
+	tt.InputTokens += input
+	tt.OutputTokens += output
+	tt.LastUpdated = time.Now()
+
+	t.saveTotals()
+}
+
+// LoadTotals loads historical token totals from a JSON file.
+func (t *ActivityTracker) LoadTotals(path string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.filePath = path
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var loaded map[string]*TokenTotals
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		return
+	}
+	t.totals = loaded
+}
+
+func (t *ActivityTracker) saveTotals() {
+	if t.filePath == "" {
+		return
+	}
+	data, err := json.Marshal(t.totals)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(t.filePath, data, 0644)
+}
+
+// GetTotals returns a snapshot of historical token totals.
+func (t *ActivityTracker) GetTotals() map[string]*TokenTotals {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	result := make(map[string]*TokenTotals, len(t.totals))
+	for k, v := range t.totals {
+		copy := *v
+		result[k] = &copy
+	}
+	return result
 }
 
 // GetAll returns a snapshot of all session activities.

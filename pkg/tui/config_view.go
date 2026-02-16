@@ -192,11 +192,11 @@ func (a *App) handleConfigItemSelect() {
 		if idx >= 0 && idx < len(models) && a.modelRouter != nil {
 			selected := models[idx]
 			a.modelRouter.SetDefaultModel(selected)
+			a.config.Lock()
 			a.config.Agents.Defaults.Model = selected
-			a.saveConfig()
-			a.renderConfig()
-			a.refreshConfigItems(section)
+			a.config.Unlock()
 			log.Printf("[config] Default model changed to: %s", selected)
+			a.asyncSaveAndRefresh()
 		}
 
 	case configSectionChannels:
@@ -214,15 +214,92 @@ func (a *App) handleConfigItemDelete() {
 		return
 	}
 
+	// Determine what we're deleting for the confirmation message
+	var itemName string
+	switch section {
+	case configSectionProviders:
+		providers := a.getProviderList()
+		if idx < 0 || idx >= len(providers) {
+			return
+		}
+		itemName = providers[idx].name + " key"
+	case configSectionChannels:
+		channelModels := a.modelRouter.GetChannelModels()
+		keys := make([]string, 0, len(channelModels))
+		for k := range channelModels {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		if idx < 0 || idx >= len(keys) {
+			return
+		}
+		itemName = "channel model: " + keys[idx]
+	case configSectionAliases:
+		aliases := a.modelRouter.GetAliases()
+		keys := make([]string, 0, len(aliases))
+		for k := range aliases {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		if idx < 0 || idx >= len(keys) {
+			return
+		}
+		itemName = "alias: " + keys[idx]
+	default:
+		return
+	}
+
+	a.showDeleteConfirm(itemName, func() {
+		a.executeConfigDelete(section, idx)
+	})
+}
+
+func (a *App) showDeleteConfirm(itemName string, onConfirm func()) {
+	label := tview.NewTextView().
+		SetDynamicColors(true).
+		SetTextAlign(tview.AlignCenter)
+	fmt.Fprintf(label, "\n[red]Delete %s?[-]\n\n[yellow]y[-] confirm  [yellow]n[-] cancel", itemName)
+	label.SetBorder(true).SetTitle(" Confirm Delete ").SetBorderColor(tcell.ColorRed)
+
+	modal := tview.NewFlex().
+		AddItem(nil, 0, 1, false).
+		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(nil, 0, 1, false).
+			AddItem(label, 7, 0, true).
+			AddItem(nil, 0, 1, false),
+			40, 0, true).
+		AddItem(nil, 0, 1, false)
+
+	closeModal := a.showConfigModal(modal, label)
+
+	label.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyRune {
+			switch event.Rune() {
+			case 'y', 'Y':
+				closeModal()
+				onConfirm()
+				return nil
+			case 'n', 'N':
+				closeModal()
+				return nil
+			}
+		}
+		if event.Key() == tcell.KeyEscape {
+			closeModal()
+			return nil
+		}
+		return event
+	})
+}
+
+func (a *App) executeConfigDelete(section, idx int) {
 	switch section {
 	case configSectionProviders:
 		providers := a.getProviderList()
 		if idx >= 0 && idx < len(providers) {
 			a.setProviderKey(providers[idx].name, "")
-			a.saveConfig()
-			a.renderConfig()
-			a.refreshConfigItems(section)
 			log.Printf("[config] Provider key cleared: %s", providers[idx].name)
+			a.asyncSaveAndRefresh()
 		}
 
 	case configSectionChannels:
@@ -235,11 +312,11 @@ func (a *App) handleConfigItemDelete() {
 		if idx >= 0 && idx < len(keys) {
 			key := keys[idx]
 			a.modelRouter.DeleteChannelModel(key)
+			a.config.Lock()
 			delete(a.config.Agents.Models, key)
-			a.saveConfig()
-			a.renderConfig()
-			a.refreshConfigItems(section)
+			a.config.Unlock()
 			log.Printf("[config] Deleted channel model: %s", key)
+			a.asyncSaveAndRefresh()
 		}
 
 	case configSectionAliases:
@@ -252,11 +329,11 @@ func (a *App) handleConfigItemDelete() {
 		if idx >= 0 && idx < len(keys) {
 			key := keys[idx]
 			a.modelRouter.DeleteAlias(key)
+			a.config.Lock()
 			delete(a.config.Agents.Aliases, key)
-			a.saveConfig()
-			a.renderConfig()
-			a.refreshConfigItems(section)
+			a.config.Unlock()
 			log.Printf("[config] Deleted alias: %s", key)
+			a.asyncSaveAndRefresh()
 		}
 	}
 }

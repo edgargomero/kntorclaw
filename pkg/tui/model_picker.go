@@ -29,6 +29,21 @@ func (s modelPickerScope) String() string {
 	return "session"
 }
 
+// getActiveChannels returns sorted channel names including "tui".
+func (a *App) getActiveChannels() []string {
+	channels := []string{"tui"}
+	if a.channelManager != nil {
+		status := a.channelManager.GetStatus()
+		for name := range status {
+			if name != "tui" {
+				channels = append(channels, name)
+			}
+		}
+	}
+	sort.Strings(channels[1:]) // keep "tui" first, sort the rest
+	return channels
+}
+
 // showModelPicker opens a modal list to select a model.
 func (a *App) showModelPicker() {
 	if a.modelRouter == nil {
@@ -36,10 +51,17 @@ func (a *App) showModelPicker() {
 	}
 
 	scope := scopeSession
+	channels := a.getActiveChannels()
+	channelIdx := 0 // start on "tui"
 
-	// Collect models from aliases + current model
-	aliases := a.modelRouter.GetAliases()
-	currentModel, currentSource := a.modelRouter.GetInfo("tui", "tui:local")
+	targetChannel := func() string { return channels[channelIdx] }
+	targetSession := func() string {
+		ch := targetChannel()
+		if ch == "tui" {
+			return "tui:local"
+		}
+		return ""
+	}
 
 	type entry struct {
 		modelID string
@@ -47,35 +69,40 @@ func (a *App) showModelPicker() {
 	}
 
 	// Build deduplicated list of models
-	seen := make(map[string]string) // model-id → alias
-	for alias, modelID := range aliases {
-		if existing, ok := seen[modelID]; ok {
-			// Keep shorter alias
-			if len(alias) < len(existing) {
+	aliases := a.modelRouter.GetAliases()
+	buildEntries := func() ([]entry, string, string) {
+		currentModel, currentSource := a.modelRouter.GetInfo(targetChannel(), targetSession())
+
+		seen := make(map[string]string) // model-id → alias
+		for alias, modelID := range aliases {
+			if existing, ok := seen[modelID]; ok {
+				if len(alias) < len(existing) {
+					seen[modelID] = alias
+				}
+			} else {
 				seen[modelID] = alias
 			}
-		} else {
-			seen[modelID] = alias
 		}
-	}
-	// Ensure current model is in the list
-	if _, ok := seen[currentModel]; !ok {
-		seen[currentModel] = ""
-	}
-	// Add known models from configured providers
-	for _, m := range a.getKnownModels() {
-		if _, ok := seen[m]; !ok {
-			seen[m] = ""
+		if _, ok := seen[currentModel]; !ok {
+			seen[currentModel] = ""
 		}
+		for _, m := range a.getKnownModels() {
+			if _, ok := seen[m]; !ok {
+				seen[m] = ""
+			}
+		}
+
+		var entries []entry
+		for modelID, alias := range seen {
+			entries = append(entries, entry{modelID: modelID, alias: alias})
+		}
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].modelID < entries[j].modelID
+		})
+		return entries, currentModel, currentSource
 	}
 
-	var entries []entry
-	for modelID, alias := range seen {
-		entries = append(entries, entry{modelID: modelID, alias: alias})
-	}
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].modelID < entries[j].modelID
-	})
+	entries, currentModel, currentSource := buildEntries()
 
 	// Build the list widget
 	list := tview.NewList()
@@ -85,36 +112,57 @@ func (a *App) showModelPicker() {
 	list.SetHighlightFullLine(true)
 	list.SetSelectedBackgroundColor(tcell.ColorDarkBlue)
 
+	populateList := func() {
+		list.Clear()
+		currentIndex := 0
+		for i, e := range entries {
+			label := e.modelID
+			secondary := fmt.Sprintf("  alias: %s", e.alias)
+			if e.alias == "" {
+				secondary = ""
+			}
+			if e.modelID == currentModel {
+				label = fmt.Sprintf("[green]%s (current)[-]", e.modelID)
+				currentIndex = i
+			}
+			list.AddItem(label, secondary, 0, nil)
+		}
+		list.SetCurrentItem(currentIndex)
+	}
+
 	updateTitle := func() {
-		list.SetTitle(fmt.Sprintf(" Select Model [scope: %s] ", scope))
+		list.SetTitle(fmt.Sprintf(" Select Model [%s] [scope: %s] ", targetChannel(), scope))
 	}
-	updateTitle()
 
-	currentIndex := 0
-	for i, e := range entries {
-		label := e.modelID
-		secondary := fmt.Sprintf("  alias: %s", e.alias)
-		if e.alias == "" {
-			secondary = ""
+	scopeDesc := func() string {
+		switch scope {
+		case scopeSession:
+			return "this session only (temporary)"
+		case scopeChannel:
+			return fmt.Sprintf("all %s sessions (persisted)", targetChannel())
+		case scopeDefault:
+			return "all channels (persisted)"
 		}
-		if e.modelID == currentModel {
-			label = fmt.Sprintf("[green]%s (current)[-]", e.modelID)
-			currentIndex = i
-		}
-		list.AddItem(label, secondary, 0, nil)
+		return ""
 	}
-	list.SetCurrentItem(currentIndex)
 
-	// Footer info
 	footer := tview.NewTextView().
 		SetTextAlign(tview.AlignCenter).
 		SetDynamicColors(true)
-	fmt.Fprintf(footer, "[yellow]Current:[-] %s [gray](%s)[-]  |  [yellow]Enter[-] apply  [yellow]Esc[-] cancel  [yellow]Tab[-] scope: %s", currentModel, currentSource, scope)
 
-	// Layout: list + footer
+	updateFooter := func() {
+		footer.Clear()
+		fmt.Fprintf(footer, "[yellow]</>[-] channel: %s  |  [yellow]Tab[-] scope: %s  |  [yellow]Enter[-] apply  [yellow]Esc[-] cancel\n[gray]%s[-]", targetChannel(), scope, scopeDesc())
+	}
+
+	populateList()
+	updateTitle()
+	updateFooter()
+
+	// Layout: list + footer (2 lines: controls + scope description)
 	modalFlex := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(list, 0, 1, true).
-		AddItem(footer, 1, 0, false)
+		AddItem(footer, 2, 0, false)
 
 	// Center the modal
 	modal := tview.NewFlex().
@@ -123,7 +171,7 @@ func (a *App) showModelPicker() {
 			AddItem(nil, 0, 1, false).
 			AddItem(modalFlex, 16, 0, true).
 			AddItem(nil, 0, 1, false),
-			50, 0, true).
+			60, 0, true).
 		AddItem(nil, 0, 1, false)
 
 	// Save previous root to restore on close
@@ -142,40 +190,76 @@ func (a *App) showModelPicker() {
 		a.tviewApp.SetFocus(previousRoot)
 	}
 
+	switchChannel := func(delta int) {
+		channelIdx = (channelIdx + delta + len(channels)) % len(channels)
+		entries, currentModel, currentSource = buildEntries()
+		_ = currentSource // used in footer via closure
+		populateList()
+		updateTitle()
+		updateFooter()
+	}
+
 	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
 		case tcell.KeyEscape:
 			closePicker()
 			return nil
+		case tcell.KeyLeft:
+			switchChannel(-1)
+			return nil
+		case tcell.KeyRight:
+			switchChannel(1)
+			return nil
 		case tcell.KeyTab:
-			// Cycle scope
 			scope = (scope + 1) % 3
 			updateTitle()
-			footer.Clear()
-			fmt.Fprintf(footer, "[yellow]Current:[-] %s [gray](%s)[-]  |  [yellow]Enter[-] apply  [yellow]Esc[-] cancel  [yellow]Tab[-] scope: %s", currentModel, currentSource, scope)
+			updateFooter()
 			return nil
 		case tcell.KeyEnter:
 			idx := list.GetCurrentItem()
 			if idx >= 0 && idx < len(entries) {
 				selected := entries[idx].modelID
+				ch := targetChannel()
+				sess := targetSession()
+				var needSave bool
 				switch scope {
 				case scopeSession:
-					a.modelRouter.SetSessionModel("tui:local", selected)
+					if sess != "" {
+						a.modelRouter.SetSessionModel(sess, selected)
+					} else {
+						// For non-TUI channels, apply as channel override
+						a.modelRouter.SetChannelModel(ch, selected)
+						a.config.Lock()
+						if a.config.Agents.Models == nil {
+							a.config.Agents.Models = make(map[string]string)
+						}
+						a.config.Agents.Models[ch] = selected
+						a.config.Unlock()
+						needSave = true
+					}
 				case scopeChannel:
-					a.modelRouter.SetChannelModel("tui", selected)
+					a.modelRouter.SetChannelModel(ch, selected)
+					a.config.Lock()
 					if a.config.Agents.Models == nil {
 						a.config.Agents.Models = make(map[string]string)
 					}
-					a.config.Agents.Models["tui"] = selected
-					a.saveConfig()
+					a.config.Agents.Models[ch] = selected
+					a.config.Unlock()
+					needSave = true
 				case scopeDefault:
 					a.modelRouter.SetDefaultModel(selected)
+					a.config.Lock()
 					a.config.Agents.Defaults.Model = selected
-					a.saveConfig()
+					a.config.Unlock()
+					needSave = true
 				}
-				a.renderConfig()
+				closePicker()
+				if needSave {
+					a.asyncSaveAndRefresh()
+				}
+			} else {
+				closePicker()
 			}
-			closePicker()
 			return nil
 		}
 		return event

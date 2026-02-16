@@ -375,6 +375,9 @@ func SaveConfig(path string, cfg *Config) error {
 	return os.WriteFile(path, data, 0644)
 }
 
+func (c *Config) Lock()   { c.mu.Lock() }
+func (c *Config) Unlock() { c.mu.Unlock() }
+
 func (c *Config) WorkspacePath() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

@@ -768,6 +768,75 @@ picoclaw agent -m "Hello"
 
 </details>
 
+### Model Routing
+
+PicoClaw supports per-channel model routing, so each channel (Telegram, WhatsApp, TUI, etc.) can use a different LLM model. Models resolve with a 3-layer priority:
+
+1. **Session override** — temporary, lost on restart
+2. **Channel override** — persisted in config under `agents.models`
+3. **Default model** — `agents.defaults.model` fallback
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "glm-4.7"
+    },
+    "models": {
+      "whatsapp": "claude-sonnet-4-5-20250929",
+      "telegram": "gpt-4o",
+      "tui": "claude-opus-4-6"
+    },
+    "aliases": {
+      "opus": "claude-opus-4-6",
+      "sonnet": "claude-sonnet-4-5-20250929"
+    }
+  }
+}
+```
+
+The provider is auto-detected from the model name (`claude*` → Anthropic, `gpt*` → OpenAI, `glm*` → Zhipu, etc.).
+
+### Token Usage Tracking
+
+PicoClaw tracks token usage per session and persists historical totals across restarts in `~/.picoclaw/token_usage.json`. The TUI TOKENS panel shows both current session usage (In/Out) and cumulative totals.
+
+### TUI Dashboard
+
+When running `picoclaw gateway`, the TUI provides a multi-panel dashboard with three modes:
+
+| Mode | Toggle | Description |
+|------|--------|-------------|
+| Normal | default | Chat + Channels/Tokens/Sessions/Logs panels |
+| Config | `F8` | Interactive config editor for providers, models, channels, aliases |
+| Focus | `F9` | Git-style layout with Files/Branches/Commits/QA + Chat/Diff |
+
+#### Keybindings
+
+Press `?` at any time for the full help screen.
+
+| Key | Normal Mode | Config Mode | Focus Mode |
+|-----|-------------|-------------|------------|
+| `F1`-`F5` | Panel focus | — | Panel focus |
+| `F6` | — | — | QA panel |
+| `F8` | Enter config | Exit config | — |
+| `F9` | Enter focus | — | Exit focus |
+| `Tab` | Next panel | Switch section/items | Next panel |
+| `Esc` | Chat input | Back / Exit | Chat input |
+| `Alt+M` | Model picker | Model picker | Model picker |
+| `Ctrl+E` | Error viewer | Error viewer | Error viewer |
+| `?` | Help screen | Help screen | Help screen |
+| `d` | — | Delete item (with confirmation) | — |
+
+#### Model Picker (`Alt+M`)
+
+The model picker allows changing the LLM model for any channel without restarting:
+
+- **←/→** — Switch between channels (tui, whatsapp, telegram, etc.)
+- **Tab** — Cycle scope: session (temporary), channel (persisted), default (all channels)
+- **Enter** — Apply the selected model
+- **Esc** — Cancel
+
 ## CLI Reference
 
 | Command                   | Description                   |

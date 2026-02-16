@@ -34,7 +34,14 @@ var (
 	logger       *Logger
 	once         sync.Once
 	mu           sync.RWMutex
+	onError      func(entry LogEntry)
 )
+
+func SetOnError(fn func(entry LogEntry)) {
+	mu.Lock()
+	defer mu.Unlock()
+	onError = fn
+}
 
 type Logger struct {
 	file *os.File
@@ -114,6 +121,10 @@ func logMessage(level LogLevel, component string, message string, fields map[str
 		if fn != nil {
 			entry.Caller = fmt.Sprintf("%s:%d (%s)", file, line, fn.Name())
 		}
+	}
+
+	if level >= WARN && onError != nil {
+		onError(entry)
 	}
 
 	if logger.file != nil {

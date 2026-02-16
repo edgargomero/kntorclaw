@@ -3,12 +3,15 @@ package tui
 import (
 	"context"
 	"log"
+	"path/filepath"
+	"sync/atomic"
 
 	"github.com/rivo/tview"
 	"github.com/sipeed/picoclaw/pkg/agent"
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/channels"
 	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/sipeed/picoclaw/pkg/logger"
 )
 
 type App struct {
@@ -52,6 +55,10 @@ type App struct {
 	modelRouter *agent.ModelRouter
 	configPath  string
 	modalOpen   bool
+	configBusy  atomic.Bool // suppresses background refreshes during config save
+
+	// Error tracking
+	errorTracker *ErrorTracker
 
 	// Core dependencies
 	config          *config.Config
@@ -106,6 +113,25 @@ func (a *App) Init() {
 
 	// Build config mode panels (F8 interactive view)
 	a.buildConfigViewPanels()
+
+	// Load historical token usage
+	if a.configPath != "" {
+		a.activityTracker.LoadTotals(filepath.Join(filepath.Dir(a.configPath), "token_usage.json"))
+	}
+
+	// Initialize error tracker with backlog in config dir
+	if a.configPath != "" {
+		errLogPath := filepath.Join(filepath.Dir(a.configPath), "errors.log")
+		if et, err := NewErrorTracker(errLogPath); err == nil {
+			a.errorTracker = et
+			logger.SetOnError(func(entry logger.LogEntry) {
+				et.Add(entry)
+				a.tviewApp.QueueUpdate(func() {
+					a.updateStatusBar()
+				})
+			})
+		}
+	}
 
 	// Setup keybindings (needs panels to be created)
 	a.setupKeybindings()
@@ -164,6 +190,9 @@ func (a *App) Run() error {
 
 func (a *App) Stop() {
 	a.cancel()
+	if a.errorTracker != nil {
+		a.errorTracker.Close()
+	}
 	a.tviewApp.Stop()
 }
 

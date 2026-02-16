@@ -23,6 +23,23 @@ func (a *App) saveConfig() {
 	}
 }
 
+// asyncSaveAndRefresh saves config in a goroutine and refreshes the UI via QueueUpdateDraw
+// to avoid blocking tview's event loop with disk I/O.
+func (a *App) asyncSaveAndRefresh() {
+	a.configBusy.Store(true)
+	go func() {
+		defer a.configBusy.Store(false)
+		a.saveConfig()
+		a.tviewApp.QueueUpdateDraw(func() {
+			a.renderConfig()
+			if a.configMode {
+				a.refreshConfigItems(a.configSections.GetCurrentItem())
+			}
+			a.showToast("[green]Config saved[-]")
+		})
+	}()
+}
+
 // showConfigModal displays a modal overlay and returns a close function.
 func (a *App) showConfigModal(modal tview.Primitive, focus tview.Primitive) func() {
 	previousFocus := a.tviewApp.GetFocus()
@@ -95,7 +112,7 @@ func (a *App) getKnownModels() []string {
 		models = append(models, "glm-4.7", "glm-4-plus", "glm-4-flash")
 	}
 	if cfg.Providers.Nvidia.APIKey != "" {
-		models = append(models, "nvidia/llama-3.1-nemotron-70b-instruct")
+		models = append(models, "nvidia/llama-3.1-nemotron-70b-instruct", "z-ai/glm5")
 	}
 	if cfg.Providers.OpenRouter.APIKey != "" {
 		models = append(models, "anthropic/claude-sonnet-4-5-20250929", "openai/gpt-4o", "google/gemini-2.5-pro", "meta-llama/llama-3.3-70b-instruct")
@@ -144,11 +161,12 @@ func (a *App) showDefaultModelPicker() {
 			return
 		}
 		a.modelRouter.SetDefaultModel(selected)
+		a.config.Lock()
 		a.config.Agents.Defaults.Model = selected
-		a.saveConfig()
-		a.renderConfig()
+		a.config.Unlock()
 		log.Printf("[config] Default model changed to: %s", selected)
 		closeModal()
+		a.asyncSaveAndRefresh()
 	}
 
 	list := tview.NewList()
@@ -325,18 +343,16 @@ func (a *App) showModelListForChannel(channel string) {
 			if idx >= 0 && idx < len(models) {
 				selected := models[idx]
 				a.modelRouter.SetChannelModel(channel, selected)
+				a.config.Lock()
 				if a.config.Agents.Models == nil {
 					a.config.Agents.Models = make(map[string]string)
 				}
 				a.config.Agents.Models[channel] = selected
-				a.saveConfig()
-				a.renderConfig()
+				a.config.Unlock()
 				log.Printf("[config] Channel model set: %s → %s", channel, selected)
 			}
 			closeModal()
-			if a.configMode {
-				a.refreshConfigItems(a.configSections.GetCurrentItem())
-			}
+			a.asyncSaveAndRefresh()
 			return nil
 		}
 		return event
@@ -414,18 +430,16 @@ func (a *App) showModelListForAlias(alias string) {
 			if idx >= 0 && idx < len(models) {
 				selected := models[idx]
 				a.modelRouter.SetAlias(alias, selected)
+				a.config.Lock()
 				if a.config.Agents.Aliases == nil {
 					a.config.Agents.Aliases = make(map[string]string)
 				}
 				a.config.Agents.Aliases[alias] = selected
-				a.saveConfig()
-				a.renderConfig()
+				a.config.Unlock()
 				log.Printf("[config] Alias set: %s → %s", alias, selected)
 			}
 			closeModal()
-			if a.configMode {
-				a.refreshConfigItems(a.configSections.GetCurrentItem())
-			}
+			a.asyncSaveAndRefresh()
 			return nil
 		}
 		return event
@@ -540,13 +554,9 @@ func (a *App) showAPIKeyInput(providerName string) {
 			return
 		}
 		a.setProviderKey(providerName, newKey)
-		a.saveConfig()
-		a.renderConfig()
-		closeModal()
-		if a.configMode {
-			a.refreshConfigItems(a.configSections.GetCurrentItem())
-		}
 		log.Printf("[config] Provider key updated: %s", providerName)
+		closeModal()
+		a.asyncSaveAndRefresh()
 	})
 
 	form.AddButton("Cancel", func() {
@@ -576,6 +586,8 @@ func (a *App) getProviderKey(name string) string {
 
 // setProviderKey sets the API key (or API base for vllm) for a provider.
 func (a *App) setProviderKey(name, key string) {
+	a.config.Lock()
+	defer a.config.Unlock()
 	p := a.getProviderConfig(name)
 	if p == nil {
 		return
@@ -668,17 +680,20 @@ func (a *App) showConfigDeletePicker() {
 				switch e.kind {
 				case "channel":
 					a.modelRouter.DeleteChannelModel(e.key)
+					a.config.Lock()
 					delete(a.config.Agents.Models, e.key)
+					a.config.Unlock()
 					log.Printf("[config] Deleted channel model: %s", e.key)
 				case "alias":
 					a.modelRouter.DeleteAlias(e.key)
+					a.config.Lock()
 					delete(a.config.Agents.Aliases, e.key)
+					a.config.Unlock()
 					log.Printf("[config] Deleted alias: %s", e.key)
 				}
-				a.saveConfig()
-				a.renderConfig()
 			}
 			closeModal()
+			a.asyncSaveAndRefresh()
 			return nil
 		}
 		return event
