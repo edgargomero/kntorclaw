@@ -6,6 +6,7 @@ import (
 
 	"github.com/rivo/tview"
 	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/sipeed/picoclaw/pkg/providers"
 )
 
 func (a *App) buildConfigPanel() *tview.TextView {
@@ -88,22 +89,5 @@ func (a *App) renderConfig() {
 }
 
 func detectProvider(cfg *config.Config) string {
-	switch {
-	case cfg.Providers.Anthropic.APIKey != "" || cfg.Providers.Anthropic.AuthMethod != "":
-		return "anthropic"
-	case cfg.Providers.OpenAI.APIKey != "" || cfg.Providers.OpenAI.AuthMethod != "":
-		return "openai"
-	case cfg.Providers.OpenRouter.APIKey != "":
-		return "openrouter"
-	case cfg.Providers.Gemini.APIKey != "":
-		return "gemini"
-	case cfg.Providers.Zhipu.APIKey != "":
-		return "zhipu"
-	case cfg.Providers.Groq.APIKey != "":
-		return "groq"
-	case cfg.Providers.VLLM.APIBase != "":
-		return "vllm"
-	default:
-		return "unknown"
-	}
+	return providers.ResolveProviderKey(cfg, cfg.Agents.Defaults.Model)
 }

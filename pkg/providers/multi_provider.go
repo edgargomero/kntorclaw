@@ -79,7 +79,12 @@ func (mp *MultiProvider) cacheKey(model string) string {
 
 // resolveProviderKey determines which provider key to use for a given model name.
 func (mp *MultiProvider) resolveProviderKey(model string) string {
-	cfg := mp.cfg
+	return ResolveProviderKey(mp.cfg, model)
+}
+
+// ResolveProviderKey determines which provider key to use for a given model name
+// and config. Exported so other packages (e.g. TUI) can reuse the same logic.
+func ResolveProviderKey(cfg *config.Config, model string) string {
 	providerName := strings.ToLower(cfg.Agents.Defaults.Provider)
 	lowerModel := strings.ToLower(model)
 
