@@ -100,6 +100,7 @@ func (a *App) toggleConfigMode() {
 }
 
 func (a *App) refreshConfigItems(section int) {
+	debugLog("REFRESH section=%d", section)
 	a.configItems.Clear()
 
 	switch section {
@@ -119,10 +120,14 @@ func (a *App) refreshConfigItems(section int) {
 	case configSectionModel:
 		a.configItems.SetTitle(" Default Model ")
 		a.configItems.SetBorderColor(tcell.ColorBlue)
+		debugLog("REFRESH model: calling collectModelIDs")
 		models := a.collectModelIDs()
+		debugLog("REFRESH model: got %d models", len(models))
 		currentDefault := ""
 		if a.modelRouter != nil {
+			debugLog("REFRESH model: getting DefaultModel")
 			currentDefault = a.modelRouter.DefaultModel()
+			debugLog("REFRESH model: default=%s", currentDefault)
 		}
 		for _, m := range models {
 			label := m
@@ -139,21 +144,25 @@ func (a *App) refreshConfigItems(section int) {
 	case configSectionChannels:
 		a.configItems.SetTitle(" Channel Models ")
 		a.configItems.SetBorderColor(tcell.ColorGreen)
+		// Show ALL active channels, with current model or "default" indicator
+		channels := a.getActiveChannels()
+		channelModels := map[string]string{}
 		if a.modelRouter != nil {
-			channelModels := a.modelRouter.GetChannelModels()
-			keys := make([]string, 0, len(channelModels))
-			for k := range channelModels {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			for _, ch := range keys {
-				a.configItems.AddItem("[green]"+ch+"[-]", "  → "+channelModels[ch], 0, nil)
+			channelModels = a.modelRouter.GetChannelModels()
+		}
+		defaultModel := ""
+		if a.modelRouter != nil {
+			defaultModel = a.modelRouter.DefaultModel()
+		}
+		for _, ch := range channels {
+			if m, ok := channelModels[ch]; ok {
+				a.configItems.AddItem("[green]"+ch+"[-]", "  → [green]"+m+"[-]", 0, nil)
+			} else {
+				a.configItems.AddItem(ch, "  → [gray]"+defaultModel+" (default)[-]", 0, nil)
 			}
 		}
-		// Add "new" entry at the end
-		a.configItems.AddItem("[yellow]+ Add new channel model[-]", "", 0, nil)
 		a.configInfo.Clear()
-		fmt.Fprint(a.configInfo, " [yellow]Enter[-] add/edit  [yellow]d[-] delete  [yellow]Tab[-] sections  [yellow]Esc[-] back  [yellow]F8[-] exit ")
+		fmt.Fprint(a.configInfo, " [yellow]Enter[-] set model  [yellow]d[-] clear override  [yellow]Tab[-] sections  [yellow]Esc[-] back  [yellow]F8[-] exit ")
 
 	case configSectionAliases:
 		a.configItems.SetTitle(" Aliases ")
@@ -179,31 +188,80 @@ func (a *App) refreshConfigItems(section int) {
 func (a *App) handleConfigItemSelect() {
 	section := a.configSections.GetCurrentItem()
 	idx := a.configItems.GetCurrentItem()
+	debugLog("SELECT section=%d idx=%d", section, idx)
 
 	switch section {
 	case configSectionProviders:
 		providers := a.getProviderList()
+		debugLog("SELECT providers: count=%d idx=%d", len(providers), idx)
 		if idx >= 0 && idx < len(providers) {
+			debugLog("SELECT opening API key input for: %s", providers[idx].name)
 			a.showAPIKeyInput(providers[idx].name)
 		}
 
 	case configSectionModel:
 		models := a.collectModelIDs()
+		debugLog("SELECT model: count=%d idx=%d", len(models), idx)
 		if idx >= 0 && idx < len(models) && a.modelRouter != nil {
 			selected := models[idx]
-			a.modelRouter.SetDefaultModel(selected)
-			a.config.Lock()
-			a.config.Agents.Defaults.Model = selected
-			a.config.Unlock()
-			log.Printf("[config] Default model changed to: %s", selected)
+			debugLog("SELECT [1] about to SetDefaultModel(%s)", selected)
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						debugLog("SELECT PANIC in SetDefaultModel: %v", r)
+					}
+				}()
+				a.modelRouter.SetDefaultModel(selected)
+			}()
+			debugLog("SELECT [2] SetDefaultModel done")
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						debugLog("SELECT PANIC in config.Lock: %v", r)
+					}
+				}()
+				a.config.Lock()
+				a.config.Agents.Defaults.Model = selected
+				a.config.Unlock()
+			}()
+			debugLog("SELECT [3] config updated, saving...")
 			a.asyncSaveAndRefresh()
+			debugLog("SELECT [4] save done")
 		}
 
 	case configSectionChannels:
-		a.showChannelModelEditor()
+		debugLog("SELECT channels: modelRouter=%v", a.modelRouter != nil)
+		if a.modelRouter == nil {
+			return
+		}
+		// All active channels are listed; select any to set/change its model
+		channels := a.getActiveChannels()
+		debugLog("SELECT channels: count=%d idx=%d", len(channels), idx)
+		if idx >= 0 && idx < len(channels) {
+			debugLog("SELECT channels: %s → showModelListForChannel", channels[idx])
+			a.showModelListForChannel(channels[idx])
+		}
 
 	case configSectionAliases:
-		a.showAliasEditor()
+		debugLog("SELECT aliases: modelRouter=%v", a.modelRouter != nil)
+		if a.modelRouter == nil {
+			return
+		}
+		// If selecting an existing alias, go straight to model picker
+		aliases := a.modelRouter.GetAliases()
+		aliasKeys := make([]string, 0, len(aliases))
+		for k := range aliases {
+			aliasKeys = append(aliasKeys, k)
+		}
+		sort.Strings(aliasKeys)
+		debugLog("SELECT aliases: existing=%d keys=%v idx=%d", len(aliasKeys), aliasKeys, idx)
+		if idx >= 0 && idx < len(aliasKeys) {
+			debugLog("SELECT aliases: existing alias %s → showModelListForAlias", aliasKeys[idx])
+			a.showModelListForAlias(aliasKeys[idx])
+		} else {
+			debugLog("SELECT aliases: new → showAliasEditor")
+			a.showAliasEditor()
+		}
 	}
 }
 
@@ -224,16 +282,16 @@ func (a *App) handleConfigItemDelete() {
 		}
 		itemName = providers[idx].name + " key"
 	case configSectionChannels:
-		channelModels := a.modelRouter.GetChannelModels()
-		keys := make([]string, 0, len(channelModels))
-		for k := range channelModels {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		if idx < 0 || idx >= len(keys) {
+		channels := a.getActiveChannels()
+		if idx < 0 || idx >= len(channels) {
 			return
 		}
-		itemName = "channel model: " + keys[idx]
+		ch := channels[idx]
+		// Only allow delete if channel has a model override
+		if _, ok := a.modelRouter.GetChannelModels()[ch]; !ok {
+			return // no override to delete
+		}
+		itemName = "model override: " + ch
 	case configSectionAliases:
 		aliases := a.modelRouter.GetAliases()
 		keys := make([]string, 0, len(aliases))
@@ -303,19 +361,14 @@ func (a *App) executeConfigDelete(section, idx int) {
 		}
 
 	case configSectionChannels:
-		channelModels := a.modelRouter.GetChannelModels()
-		keys := make([]string, 0, len(channelModels))
-		for k := range channelModels {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		if idx >= 0 && idx < len(keys) {
-			key := keys[idx]
-			a.modelRouter.DeleteChannelModel(key)
+		channels := a.getActiveChannels()
+		if idx >= 0 && idx < len(channels) {
+			ch := channels[idx]
+			a.modelRouter.DeleteChannelModel(ch)
 			a.config.Lock()
-			delete(a.config.Agents.Models, key)
+			delete(a.config.Agents.Models, ch)
 			a.config.Unlock()
-			log.Printf("[config] Deleted channel model: %s", key)
+			debugLog("DELETE channel model: %s", ch)
 			a.asyncSaveAndRefresh()
 		}
 
@@ -340,6 +393,7 @@ func (a *App) executeConfigDelete(section, idx int) {
 
 // handleConfigModeKeys processes all keybindings when in config mode.
 func (a *App) handleConfigModeKeys(event *tcell.EventKey) *tcell.EventKey {
+	debugLog("CONFIG key=%v rune=%c focusIdx=%d", event.Key(), event.Rune(), a.focusIndex)
 	switch event.Key() {
 	case tcell.KeyEscape:
 		if a.focusIndex == 1 {
@@ -355,11 +409,15 @@ func (a *App) handleConfigModeKeys(event *tcell.EventKey) *tcell.EventKey {
 	case tcell.KeyEnter:
 		if a.focusIndex == 0 {
 			// Sections → jump to items
+			debugLog("CONFIG Enter: focusIdx 0→1, focusing configItems (count=%d)", a.configItems.GetItemCount())
 			a.focusIndex = 1
 			a.tviewApp.SetFocus(a.configItems)
+			debugLog("CONFIG Enter: done, focus=%T", a.tviewApp.GetFocus())
 		} else {
 			// Items → handle selection
+			debugLog("CONFIG Enter: focusIdx=1, calling handleConfigItemSelect")
 			a.handleConfigItemSelect()
+			debugLog("CONFIG Enter: handleConfigItemSelect returned")
 		}
 		return nil
 

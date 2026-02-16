@@ -27,7 +27,11 @@ func (w *LogWriter) Write(p []byte) (n int, err error) {
 		return len(p), nil
 	}
 
-	w.app.tviewApp.QueueUpdateDraw(func() {
+	// Must use a goroutine: QueueUpdateDraw blocks on tview's unbuffered
+	// updates channel. When log.Printf is called from an InputCapture handler
+	// (already on the event loop), QueueUpdateDraw deadlocks because the
+	// event loop can't read from the channel while it's processing the handler.
+	go w.app.tviewApp.QueueUpdateDraw(func() {
 		fmt.Fprintf(w.logsView, "%s\n", tview.Escape(text))
 		trimLogView(w.logsView)
 		w.logsView.ScrollToEnd()

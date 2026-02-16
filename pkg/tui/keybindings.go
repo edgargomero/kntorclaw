@@ -27,8 +27,12 @@ func (a *App) setupKeybindings() {
 	a.focusIndex = 0
 
 	a.tviewApp.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		debugLog("KEY global: key=%v rune=%c mod=%v modalOpen=%v configMode=%v focusIdx=%d focus=%T",
+			event.Key(), event.Rune(), event.Modifiers(), a.modalOpen, a.configMode, a.focusIndex, a.tviewApp.GetFocus())
+
 		// Skip global keybindings when a modal is open
 		if a.modalOpen {
+			debugLog("KEY global: modal open, passing through")
 			return event
 		}
 
@@ -95,7 +99,7 @@ func (a *App) setupKeybindings() {
 			// Approve checkpoint when QA panel is focused and waiting
 			if a.focusMode && a.qaTracker != nil && a.qaTracker.WaitingApproval && a.focusIndex == 5 {
 				a.qaTracker.Approve()
-				a.tviewApp.QueueUpdateDraw(func() {
+				go a.tviewApp.QueueUpdateDraw(func() {
 					a.refreshQAPanel()
 				})
 				return nil
@@ -110,7 +114,7 @@ func (a *App) setupKeybindings() {
 			// Reject checkpoint when QA panel is focused and waiting
 			if a.focusMode && a.qaTracker != nil && a.qaTracker.WaitingApproval && a.focusIndex == 5 {
 				a.qaTracker.Reject()
-				a.tviewApp.QueueUpdateDraw(func() {
+				go a.tviewApp.QueueUpdateDraw(func() {
 					a.refreshQAPanel()
 				})
 				return nil

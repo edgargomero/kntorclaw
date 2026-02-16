@@ -23,26 +23,23 @@ func (a *App) saveConfig() {
 	}
 }
 
-// asyncSaveAndRefresh saves config in a goroutine and refreshes the UI via QueueUpdateDraw
-// to avoid blocking tview's event loop with disk I/O.
+// asyncSaveAndRefresh saves config and refreshes the UI synchronously.
+// Must be called from the tview event loop (InputCapture handlers, button callbacks, etc.).
+// Previous async version caused deadlocks: the save goroutine held config.RLock while
+// a new config edit on the event loop tried config.Lock, freezing the UI.
 func (a *App) asyncSaveAndRefresh() {
-	a.configBusy.Store(true)
-	go func() {
-		defer a.configBusy.Store(false)
-		a.saveConfig()
-		a.tviewApp.QueueUpdateDraw(func() {
-			a.renderConfig()
-			if a.configMode {
-				a.refreshConfigItems(a.configSections.GetCurrentItem())
-			}
-			a.showToast("[green]Config saved[-]")
-		})
-	}()
+	a.saveConfig()
+	a.renderConfig()
+	if a.configMode {
+		a.refreshConfigItems(a.configSections.GetCurrentItem())
+	}
+	a.showToast("[green]Config saved[-]")
 }
 
 // showConfigModal displays a modal overlay and returns a close function.
 func (a *App) showConfigModal(modal tview.Primitive, focus tview.Primitive) func() {
 	previousFocus := a.tviewApp.GetFocus()
+	debugLog("MODAL OPEN: focus=%T previousFocus=%T configMode=%v", focus, previousFocus, a.configMode)
 
 	pages := tview.NewPages().
 		AddPage("background", func() tview.Primitive {
@@ -59,8 +56,10 @@ func (a *App) showConfigModal(modal tview.Primitive, focus tview.Primitive) func
 	a.modalOpen = true
 	a.tviewApp.SetRoot(pages, true)
 	a.tviewApp.SetFocus(focus)
+	debugLog("MODAL OPEN done: modalOpen=%v actualFocus=%T", a.modalOpen, a.tviewApp.GetFocus())
 
 	return func() {
+		debugLog("MODAL CLOSE: restoring previousFocus=%T configMode=%v", previousFocus, a.configMode)
 		a.modalOpen = false
 		if a.configMode {
 			a.tviewApp.SetRoot(a.configLayout, true)
@@ -70,6 +69,7 @@ func (a *App) showConfigModal(modal tview.Primitive, focus tview.Primitive) func
 			a.tviewApp.SetRoot(a.normalLayout, true)
 		}
 		a.tviewApp.SetFocus(previousFocus)
+		debugLog("MODAL CLOSE done: modalOpen=%v actualFocus=%T", a.modalOpen, a.tviewApp.GetFocus())
 	}
 }
 
@@ -122,19 +122,25 @@ func (a *App) getKnownModels() []string {
 
 // collectModelIDs returns a sorted list of known model IDs from aliases, current model, and provider catalogs.
 func (a *App) collectModelIDs() []string {
+	debugLog("collectModelIDs: start")
 	seen := make(map[string]bool)
 	if a.modelRouter != nil {
+		debugLog("collectModelIDs: GetAliases...")
 		for _, modelID := range a.modelRouter.GetAliases() {
 			seen[modelID] = true
 		}
+		debugLog("collectModelIDs: GetInfo...")
 		model, _ := a.modelRouter.GetInfo("tui", "tui:local")
 		seen[model] = true
+		debugLog("collectModelIDs: DefaultModel...")
 		seen[a.modelRouter.DefaultModel()] = true
+		debugLog("collectModelIDs: getKnownModels...")
 	}
 
 	for _, m := range a.getKnownModels() {
 		seen[m] = true
 	}
+	debugLog("collectModelIDs: done, count=%d", len(seen))
 
 	var models []string
 	for m := range seen {
@@ -272,39 +278,47 @@ func (a *App) showDefaultModelPicker() {
 	}
 }
 
-// showChannelModelEditor opens a two-step picker: first select channel, then select model.
+// showChannelModelEditor opens a two-step picker: first select channel from list, then select model.
 func (a *App) showChannelModelEditor() {
 	if a.modelRouter == nil {
 		return
 	}
 
-	// Step 1: input channel name
-	form := tview.NewForm()
-	form.SetBorder(true)
-	form.SetTitle(" Channel Model: Enter Channel Name ")
-	form.SetBorderColor(tcell.ColorBlue)
+	// Step 1: pick channel from list of available channels
+	channels := a.getActiveChannels()
 
-	form.AddInputField("Channel", "", 30, nil, nil)
+	list := tview.NewList()
+	list.SetBorder(true)
+	list.SetTitle(" Select Channel ")
+	list.SetBorderColor(tcell.ColorGreen)
+	list.ShowSecondaryText(true)
+	list.SetHighlightFullLine(true)
+	list.SetSelectedBackgroundColor(tcell.ColorDarkBlue)
 
-	modal := centerModal(form, 50, 7)
-	closeModal := a.showConfigModal(modal, form)
-
-	form.AddButton("Next", func() {
-		channel := form.GetFormItemByLabel("Channel").(*tview.InputField).GetText()
-		if channel == "" {
-			return
+	channelModels := a.modelRouter.GetChannelModels()
+	for _, ch := range channels {
+		secondary := "  [gray]no model set[-]"
+		if m, ok := channelModels[ch]; ok {
+			secondary = fmt.Sprintf("  [green]%s[-]", m)
 		}
-		closeModal()
-		// Step 2: pick model from list
-		a.showModelListForChannel(channel)
-	})
-	form.AddButton("Cancel", func() {
-		closeModal()
-	})
+		list.AddItem(ch, secondary, 0, nil)
+	}
 
-	form.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Key() == tcell.KeyEscape {
+	modal := centerModal(list, 50, 16)
+	closeModal := a.showConfigModal(modal, list)
+
+	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyEscape:
 			closeModal()
+			return nil
+		case tcell.KeyEnter:
+			idx := list.GetCurrentItem()
+			if idx >= 0 && idx < len(channels) {
+				selected := channels[idx]
+				closeModal()
+				a.showModelListForChannel(selected)
+			}
 			return nil
 		}
 		return event
@@ -313,10 +327,13 @@ func (a *App) showChannelModelEditor() {
 
 // showModelListForChannel shows a model list picker and assigns the selected model to a channel.
 func (a *App) showModelListForChannel(channel string) {
+	log.Printf("[config] showModelListForChannel called for: %s", channel)
 	models := a.collectModelIDs()
 	if len(models) == 0 {
+		log.Printf("[config] No models found, returning")
 		return
 	}
+	log.Printf("[config] Models available: %d", len(models))
 
 	list := tview.NewList()
 	list.SetBorder(true)
@@ -332,16 +349,21 @@ func (a *App) showModelListForChannel(channel string) {
 
 	modal := centerModal(list, 60, 16)
 	closeModal := a.showConfigModal(modal, list)
+	log.Printf("[config] Modal opened for channel: %s, modalOpen=%v", channel, a.modalOpen)
 
 	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		log.Printf("[config] Model list key: %v rune=%c", event.Key(), event.Rune())
 		switch event.Key() {
 		case tcell.KeyEscape:
+			log.Printf("[config] Model list: Esc pressed, closing")
 			closeModal()
 			return nil
 		case tcell.KeyEnter:
 			idx := list.GetCurrentItem()
+			log.Printf("[config] Model list: Enter pressed, idx=%d", idx)
 			if idx >= 0 && idx < len(models) {
 				selected := models[idx]
+				log.Printf("[config] Applying: %s → %s", channel, selected)
 				a.modelRouter.SetChannelModel(channel, selected)
 				a.config.Lock()
 				if a.config.Agents.Models == nil {
@@ -351,8 +373,11 @@ func (a *App) showModelListForChannel(channel string) {
 				a.config.Unlock()
 				log.Printf("[config] Channel model set: %s → %s", channel, selected)
 			}
+			log.Printf("[config] Closing modal...")
 			closeModal()
+			log.Printf("[config] Modal closed, saving...")
 			a.asyncSaveAndRefresh()
+			log.Printf("[config] asyncSaveAndRefresh called")
 			return nil
 		}
 		return event

@@ -2,9 +2,13 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"log"
+	syslog "log"
+	"os"
 	"path/filepath"
 	"sync/atomic"
+	"time"
 
 	"github.com/rivo/tview"
 	"github.com/sipeed/picoclaw/pkg/agent"
@@ -13,6 +17,31 @@ import (
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/logger"
 )
+
+// debugLog writes to ~/.picoclaw/tui_debug.log when PICOCLAW_TUI_DEBUG=1.
+// Use from any TUI code to trace key events, modal opens, focus changes, etc.
+var debugLog func(format string, args ...interface{})
+
+func init() {
+	if os.Getenv("PICOCLAW_TUI_DEBUG") == "1" {
+		home, _ := os.UserHomeDir()
+		path := filepath.Join(home, ".picoclaw", "tui_debug.log")
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+		if err != nil {
+			syslog.Printf("[tui-debug] Failed to open debug log: %v", err)
+			debugLog = func(string, ...interface{}) {}
+			return
+		}
+		debugLog = func(format string, args ...interface{}) {
+			ts := time.Now().Format("15:04:05.000")
+			fmt.Fprintf(f, ts+" "+format+"\n", args...)
+			f.Sync()
+		}
+		debugLog("=== TUI debug log started (v3-lockfree) ===")
+	} else {
+		debugLog = func(string, ...interface{}) {}
+	}
+}
 
 type App struct {
 	tviewApp *tview.Application

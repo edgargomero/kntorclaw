@@ -30,23 +30,72 @@ func (s modelPickerScope) String() string {
 	return "session"
 }
 
-// getActiveChannels returns sorted channel names including "tui".
+// getActiveChannels returns channel names from all sources: config enabled channels,
+// channelManager status, and already-configured channel models. "tui" is always first.
 func (a *App) getActiveChannels() []string {
-	channels := []string{"tui"}
-	if a.channelManager != nil {
-		status := a.channelManager.GetStatus()
-		for name := range status {
-			if name != "tui" {
-				channels = append(channels, name)
-			}
+	seen := map[string]bool{"tui": true}
+
+	// From config: channels with enabled: true
+	if a.config != nil {
+		if a.config.Channels.WhatsApp.Enabled {
+			seen["whatsapp"] = true
+		}
+		if a.config.Channels.Telegram.Enabled {
+			seen["telegram"] = true
+		}
+		if a.config.Channels.Discord.Enabled {
+			seen["discord"] = true
+		}
+		if a.config.Channels.Feishu.Enabled {
+			seen["feishu"] = true
+		}
+		if a.config.Channels.Slack.Enabled {
+			seen["slack"] = true
+		}
+		if a.config.Channels.LINE.Enabled {
+			seen["line"] = true
+		}
+		if a.config.Channels.QQ.Enabled {
+			seen["qq"] = true
+		}
+		if a.config.Channels.DingTalk.Enabled {
+			seen["dingtalk"] = true
+		}
+		if a.config.Channels.OneBot.Enabled {
+			seen["onebot"] = true
+		}
+		if a.config.Channels.MaixCam.Enabled {
+			seen["maixcam"] = true
 		}
 	}
-	sort.Strings(channels[1:]) // keep "tui" first, sort the rest
+
+	// From channelManager (runtime status)
+	if a.channelManager != nil {
+		for name := range a.channelManager.GetStatus() {
+			seen[name] = true
+		}
+	}
+
+	// From already-configured channel models in config
+	if a.modelRouter != nil {
+		for ch := range a.modelRouter.GetChannelModels() {
+			seen[ch] = true
+		}
+	}
+
+	channels := []string{"tui"}
+	for name := range seen {
+		if name != "tui" {
+			channels = append(channels, name)
+		}
+	}
+	sort.Strings(channels[1:])
 	return channels
 }
 
 // showModelPicker opens a modal list to select a model.
 func (a *App) showModelPicker() {
+	debugLog("MODEL_PICKER: open, modelRouter=%v", a.modelRouter != nil)
 	if a.modelRouter == nil {
 		return
 	}
@@ -54,6 +103,7 @@ func (a *App) showModelPicker() {
 	scope := scopeSession
 	channels := a.getActiveChannels()
 	channelIdx := 0 // start on "tui"
+	debugLog("MODEL_PICKER: channels=%v", channels)
 	log.Printf("[model-picker] Available channels: %v", channels)
 
 	targetChannel := func() string { return channels[channelIdx] }
@@ -203,28 +253,35 @@ func (a *App) showModelPicker() {
 	}
 
 	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		debugLog("MODEL_PICKER key=%v rune=%c", event.Key(), event.Rune())
 		switch event.Key() {
 		case tcell.KeyEscape:
+			debugLog("MODEL_PICKER: Esc → closePicker")
 			closePicker()
 			return nil
 		case tcell.KeyLeft:
+			debugLog("MODEL_PICKER: Left → switchChannel(-1)")
 			switchChannel(-1)
 			return nil
 		case tcell.KeyRight:
+			debugLog("MODEL_PICKER: Right → switchChannel(1)")
 			switchChannel(1)
 			return nil
 		case tcell.KeyTab:
 			scope = (scope + 1) % 3
+			debugLog("MODEL_PICKER: Tab → scope=%s", scope)
 			updateTitle()
 			updateFooter()
 			return nil
 		case tcell.KeyEnter:
 			idx := list.GetCurrentItem()
+			debugLog("MODEL_PICKER: Enter idx=%d", idx)
 			if idx >= 0 && idx < len(entries) {
 				selected := entries[idx].modelID
 				ch := targetChannel()
 				sess := targetSession()
 				var needSave bool
+				debugLog("MODEL_PICKER: apply model=%s ch=%s scope=%s sess=%s", selected, ch, scope, sess)
 				log.Printf("[model-picker] Applying model=%s channel=%s scope=%s session=%s", selected, ch, scope, sess)
 				switch scope {
 				case scopeSession:
