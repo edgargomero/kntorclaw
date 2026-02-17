@@ -168,13 +168,13 @@ func (a *App) showModelPicker() {
 		list.Clear()
 		currentIndex := 0
 		for i, e := range entries {
-			label := e.modelID
+			label := formatModelLabel(e.modelID)
 			secondary := fmt.Sprintf("  alias: %s", e.alias)
 			if e.alias == "" {
 				secondary = ""
 			}
 			if e.modelID == currentModel {
-				label = fmt.Sprintf("[green]%s (current)[-]", e.modelID)
+				label = fmt.Sprintf("[green]%s (current)[-]", formatModelLabel(e.modelID))
 				currentIndex = i
 			}
 			list.AddItem(label, secondary, 0, nil)

@@ -9,7 +9,9 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/sipeed/picoclaw/pkg/auth"
 	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/sipeed/picoclaw/pkg/providers"
 )
 
 // saveConfig persists the current config to disk.
@@ -91,31 +93,56 @@ func (a *App) getKnownModels() []string {
 	var models []string
 
 	if cfg.Providers.Anthropic.APIKey != "" || cfg.Providers.Anthropic.AuthMethod != "" {
-		models = append(models, "claude-sonnet-4-5-20250929", "claude-opus-4-6", "claude-haiku-4-5-20251001")
+		models = append(models,
+			"claude-sonnet-4-5-20250929@anthropic",
+			"claude-opus-4-6@anthropic",
+			"claude-haiku-4-5-20251001@anthropic",
+		)
+	}
+	if cfg.Providers.Anthropic.AuthMethod != "" {
+		models = append(models,
+			"claude-sonnet-4-5-20250929@anthropic-cc",
+			"claude-opus-4-6@anthropic-cc",
+			"claude-haiku-4-5-20251001@anthropic-cc",
+		)
 	}
 	if cfg.Providers.OpenAI.APIKey != "" || cfg.Providers.OpenAI.AuthMethod != "" {
-		models = append(models, "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "o3-mini")
+		models = append(models,
+			"gpt-4o@openai", "gpt-4o-mini@openai",
+			"gpt-4.1@openai", "gpt-4.1-mini@openai", "o3-mini@openai",
+		)
 	}
 	if cfg.Providers.Gemini.APIKey != "" {
-		models = append(models, "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash")
+		models = append(models,
+			"gemini-2.5-pro@gemini", "gemini-2.5-flash@gemini", "gemini-2.0-flash@gemini",
+		)
 	}
 	if cfg.Providers.Groq.APIKey != "" {
-		models = append(models, "llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768")
+		models = append(models,
+			"llama-3.3-70b-versatile@groq", "llama-3.1-8b-instant@groq", "mixtral-8x7b-32768@groq",
+		)
 	}
 	if cfg.Providers.DeepSeek.APIKey != "" {
-		models = append(models, "deepseek-chat", "deepseek-reasoner")
+		models = append(models, "deepseek-chat@deepseek", "deepseek-reasoner@deepseek")
 	}
 	if cfg.Providers.Moonshot.APIKey != "" {
-		models = append(models, "kimi-k2.5", "moonshot-v1-128k")
+		models = append(models, "kimi-k2.5@moonshot", "moonshot-v1-128k@moonshot")
 	}
 	if cfg.Providers.Zhipu.APIKey != "" {
-		models = append(models, "glm-4.7", "glm-4-plus", "glm-4-flash")
+		models = append(models, "glm-4.7@zhipu", "glm-4-plus@zhipu", "glm-4-flash@zhipu")
 	}
 	if cfg.Providers.Nvidia.APIKey != "" {
-		models = append(models, "nvidia/llama-3.1-nemotron-70b-instruct", "z-ai/glm5")
+		models = append(models,
+			"nvidia/llama-3.1-nemotron-70b-instruct@nvidia", "z-ai/glm5@nvidia",
+		)
 	}
 	if cfg.Providers.OpenRouter.APIKey != "" {
-		models = append(models, "anthropic/claude-sonnet-4-5-20250929", "openai/gpt-4o", "google/gemini-2.5-pro", "meta-llama/llama-3.3-70b-instruct")
+		models = append(models,
+			"anthropic/claude-sonnet-4-5-20250929@openrouter",
+			"openai/gpt-4o@openrouter",
+			"google/gemini-2.5-pro@openrouter",
+			"meta-llama/llama-3.3-70b-instruct@openrouter",
+		)
 	}
 	return models
 }
@@ -183,9 +210,9 @@ func (a *App) showDefaultModelPicker() {
 
 	currentIdx := 0
 	for i, m := range models {
-		label := m
+		label := formatModelLabel(m)
 		if m == currentDefault {
-			label = fmt.Sprintf("[green]%s (current)[-]", m)
+			label = fmt.Sprintf("[green]%s (current)[-]", formatModelLabel(m))
 			currentIdx = i
 		}
 		list.AddItem(label, "", 0, nil)
@@ -257,7 +284,26 @@ func (a *App) showDefaultModelPicker() {
 			}
 			return nil
 		case tcell.KeyEnter:
-			applyModel(customInput.GetText(), closeModal)
+			text := strings.TrimSpace(customInput.GetText())
+			if text == "" {
+				return nil
+			}
+			_, prov := providers.ParseModelID(text)
+			if prov != "" {
+				// Already has @provider, apply directly
+				applyModel(text, closeModal)
+			} else {
+				// No @provider — show provider picker
+				closeModal()
+				a.showProviderPickerForCustomModel(text, func(modelWithProvider string) {
+					a.modelRouter.SetDefaultModel(modelWithProvider)
+					a.config.Lock()
+					a.config.Agents.Defaults.Model = modelWithProvider
+					a.config.Unlock()
+					log.Printf("[config] Default model changed to: %s", modelWithProvider)
+					a.asyncSaveAndRefresh()
+				})
+			}
 			return nil
 		}
 		return event
@@ -344,7 +390,7 @@ func (a *App) showModelListForChannel(channel string) {
 	list.SetSelectedBackgroundColor(tcell.ColorDarkBlue)
 
 	for _, m := range models {
-		list.AddItem(m, "", 0, nil)
+		list.AddItem(formatModelLabel(m), "", 0, nil)
 	}
 
 	modal := centerModal(list, 60, 16)
@@ -439,7 +485,7 @@ func (a *App) showModelListForAlias(alias string) {
 	list.SetSelectedBackgroundColor(tcell.ColorDarkBlue)
 
 	for _, m := range models {
-		list.AddItem(m, "", 0, nil)
+		list.AddItem(formatModelLabel(m), "", 0, nil)
 	}
 
 	modal := centerModal(list, 60, 16)
@@ -528,6 +574,7 @@ func (a *App) getProviderList() []providerEntry {
 	cfg := a.config
 	return []providerEntry{
 		{"anthropic", cfg.Providers.Anthropic.APIKey != ""},
+		{"anthropic-cc", cfg.Providers.Anthropic.AuthMethod != ""},
 		{"openai", cfg.Providers.OpenAI.APIKey != ""},
 		{"openrouter", cfg.Providers.OpenRouter.APIKey != ""},
 		{"gemini", cfg.Providers.Gemini.APIKey != ""},
@@ -540,6 +587,118 @@ func (a *App) getProviderList() []providerEntry {
 		{"vllm", cfg.Providers.VLLM.APIBase != ""},
 		{"github_copilot", cfg.Providers.GitHubCopilot.APIKey != ""},
 	}
+}
+
+// showAuthProviderInfo shows a config modal for auth-based providers (anthropic-cc).
+// Displays current credential status and allows pasting a setup-token from Claude Code.
+func (a *App) showAuthProviderInfo(providerName string) {
+	cred, _ := auth.GetCredential("anthropic")
+
+	container := tview.NewFlex().SetDirection(tview.FlexRow)
+	container.SetBorder(true)
+	container.SetTitle(fmt.Sprintf(" [yellow]%s[-] — Claude Code Setup Token ", providerName))
+	container.SetBorderColor(tcell.ColorBlue)
+
+	// Status section
+	status := tview.NewTextView().
+		SetDynamicColors(true).
+		SetWordWrap(true)
+
+	if cred != nil && cred.AccessToken != "" {
+		maskedToken := ""
+		if len(cred.AccessToken) > 12 {
+			maskedToken = cred.AccessToken[:6] + "..." + cred.AccessToken[len(cred.AccessToken)-4:]
+		} else {
+			maskedToken = "***"
+		}
+		expiresInfo := "n/a"
+		if !cred.ExpiresAt.IsZero() {
+			expiresInfo = cred.ExpiresAt.Format("2006-01-02 15:04")
+		}
+		fmt.Fprintf(status, " [green]● Connected[-]  method:[yellow]%s[-]  token:[gray]%s[-]  expires:%s", cred.AuthMethod, maskedToken, expiresInfo)
+	} else {
+		fmt.Fprint(status, " [red]● Not configured[-]")
+	}
+
+	// Instructions
+	instructions := tview.NewTextView().
+		SetDynamicColors(true).
+		SetWordWrap(true)
+	fmt.Fprint(instructions, " Run in Claude Code CLI:  [yellow]claude setup-token[-]    then paste the token below:")
+
+	// Token input
+	tokenInput := tview.NewInputField().
+		SetLabel(" Token: ").
+		SetFieldWidth(60).
+		SetFieldBackgroundColor(tcell.ColorDarkSlateGray).
+		SetPlaceholder("sk-ant-oat01-...")
+
+	// Footer
+	footer := tview.NewTextView().
+		SetDynamicColors(true).
+		SetTextAlign(tview.AlignCenter).
+		SetText("[yellow]Enter[-] save token  [yellow]Esc[-] cancel")
+
+	container.AddItem(status, 1, 0, false)
+	container.AddItem(instructions, 2, 0, false)
+	container.AddItem(tokenInput, 1, 0, true)
+	container.AddItem(footer, 1, 0, false)
+
+	modal := centerModal(container, 72, 9)
+	closeModal := a.showConfigModal(modal, tokenInput)
+
+	tokenInput.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyEscape:
+			closeModal()
+			return nil
+		case tcell.KeyEnter:
+			token := strings.TrimSpace(tokenInput.GetText())
+			if token == "" {
+				return nil
+			}
+			// Validate prefix
+			if !strings.HasPrefix(token, "sk-ant-oat01-") {
+				status.Clear()
+				fmt.Fprint(status, " [red]Invalid token[-] — must start with [yellow]sk-ant-oat01-[-]")
+				return nil
+			}
+			if len(token) < 80 {
+				status.Clear()
+				fmt.Fprint(status, " [red]Invalid token[-] — too short (min 80 chars)")
+				return nil
+			}
+			// Save credential
+			newCred := &auth.AuthCredential{
+				AccessToken: token,
+				Provider:    "anthropic",
+				AuthMethod:  "setup-token",
+			}
+			if err := auth.SetCredential("anthropic", newCred); err != nil {
+				status.Clear()
+				fmt.Fprintf(status, " [red]Error saving[-]: %v", err)
+				return nil
+			}
+			// Update config auth_method
+			a.config.Lock()
+			a.config.Providers.Anthropic.AuthMethod = "setup-token"
+			a.config.Unlock()
+			log.Printf("[config] anthropic-cc: setup-token saved successfully")
+			closeModal()
+			a.asyncSaveAndRefresh()
+			a.showToast("[green]anthropic-cc configured[-]")
+			return nil
+		}
+		return event
+	})
+
+	container.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEscape {
+			closeModal()
+			return nil
+		}
+		return event
+	})
 }
 
 // showAPIKeyInput opens a form to input an API key for a specific provider.
@@ -719,6 +878,69 @@ func (a *App) showConfigDeletePicker() {
 			}
 			closeModal()
 			a.asyncSaveAndRefresh()
+			return nil
+		}
+		return event
+	})
+}
+
+// formatModelLabel formats a model ID for display in pickers.
+// "claude-sonnet-4-5-20250929@anthropic" → "[anthropic] claude-sonnet-4-5-20250929"
+// "gpt-4o" → "gpt-4o"
+func formatModelLabel(modelID string) string {
+	model, prov := providers.ParseModelID(modelID)
+	if prov != "" {
+		return fmt.Sprintf("[yellow]%s[-] %s", prov, model)
+	}
+	return model
+}
+
+// showProviderPickerForCustomModel opens a provider picker after the user types a custom model without @provider.
+// Once a provider is selected, it calls the apply callback with the full model@provider string.
+func (a *App) showProviderPickerForCustomModel(model string, apply func(string)) {
+	providerList := a.getProviderList()
+
+	// Only show configured providers
+	var configured []providerEntry
+	for _, p := range providerList {
+		if p.hasKey {
+			configured = append(configured, p)
+		}
+	}
+
+	if len(configured) == 0 {
+		// No providers configured, just use the model as-is
+		apply(model)
+		return
+	}
+
+	list := tview.NewList()
+	list.SetBorder(true)
+	list.SetTitle(fmt.Sprintf(" Select Provider for [yellow]%s[-] ", model))
+	list.SetBorderColor(tcell.ColorYellow)
+	list.ShowSecondaryText(false)
+	list.SetHighlightFullLine(true)
+	list.SetSelectedBackgroundColor(tcell.ColorDarkBlue)
+
+	for _, p := range configured {
+		list.AddItem(p.name, "", 0, nil)
+	}
+
+	modal := centerModal(list, 40, 12)
+	closeModal := a.showConfigModal(modal, list)
+
+	list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyEscape:
+			closeModal()
+			return nil
+		case tcell.KeyEnter:
+			idx := list.GetCurrentItem()
+			if idx >= 0 && idx < len(configured) {
+				selected := providers.FormatModelID(model, configured[idx].name)
+				closeModal()
+				apply(selected)
+			}
 			return nil
 		}
 		return event

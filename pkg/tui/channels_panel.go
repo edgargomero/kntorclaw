@@ -7,6 +7,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/sipeed/picoclaw/pkg/providers"
 )
 
 func (a *App) buildChannelsPanel() *tview.Table {
@@ -16,7 +17,7 @@ func (a *App) buildChannelsPanel() *tview.Table {
 }
 
 func (a *App) setChannelsHeader() {
-	headers := []string{"Channel", "Status"}
+	headers := []string{"Channel", "Status", "Provider"}
 	for i, h := range headers {
 		cell := tview.NewTableCell(h).
 			SetTextColor(tcell.ColorYellow).
@@ -52,6 +53,12 @@ func (a *App) refreshChannels() {
 
 	status := a.channelManager.GetStatus()
 
+	// Get provider health statuses if available
+	var providerStatuses map[string]*providers.ProviderStatus
+	if a.healthChecker != nil {
+		providerStatuses = a.healthChecker.GetStatuses()
+	}
+
 	a.tviewApp.QueueUpdateDraw(func() {
 		// Clear rows except header
 		rowCount := a.channelsTable.GetRowCount()
@@ -75,10 +82,28 @@ func (a *App) refreshChannels() {
 				statusText = "[green]online"
 			}
 
+			providerText := "[gray]\u2014" // em-dash for unconfigured
+			if a.modelRouter != nil && providerStatuses != nil {
+				model := a.modelRouter.Resolve(name, "")
+				providerKey := providers.ResolveProviderKey(a.config, model)
+				if ps, ok := providerStatuses[providerKey]; ok {
+					switch {
+					case ps.Reachable && ps.LLMReady:
+						providerText = "[green]\u25cf" // filled circle
+					case ps.Reachable:
+						providerText = "[yellow]\u25cf"
+					default:
+						providerText = "[red]\u25cf"
+					}
+				}
+			}
+
 			a.channelsTable.SetCell(row, 0,
 				tview.NewTableCell(name).SetExpansion(1))
 			a.channelsTable.SetCell(row, 1,
 				tview.NewTableCell(statusText).SetExpansion(1))
+			a.channelsTable.SetCell(row, 2,
+				tview.NewTableCell(providerText).SetExpansion(1))
 			row++
 		}
 	})

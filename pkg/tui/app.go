@@ -16,30 +16,47 @@ import (
 	"github.com/sipeed/picoclaw/pkg/channels"
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/logger"
+	"github.com/sipeed/picoclaw/pkg/providers"
 )
 
-// debugLog writes to ~/.picoclaw/tui_debug.log when PICOCLAW_TUI_DEBUG=1.
-// Use from any TUI code to trace key events, modal opens, focus changes, etc.
+// Debug levels for TUI logging (PICOCLAW_TUI_DEBUG env var):
+//   "1" = errors only (debugError)
+//   "2" = verbose (debugLog + debugError)
 var debugLog func(format string, args ...interface{})
+var debugError func(format string, args ...interface{})
 
 func init() {
-	if os.Getenv("PICOCLAW_TUI_DEBUG") == "1" {
+	noop := func(string, ...interface{}) {}
+	level := os.Getenv("PICOCLAW_TUI_DEBUG")
+
+	if level == "1" || level == "2" {
 		home, _ := os.UserHomeDir()
 		path := filepath.Join(home, ".picoclaw", "tui_debug.log")
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 		if err != nil {
 			syslog.Printf("[tui-debug] Failed to open debug log: %v", err)
-			debugLog = func(string, ...interface{}) {}
+			debugLog = noop
+			debugError = noop
 			return
 		}
-		debugLog = func(format string, args ...interface{}) {
+		write := func(prefix, format string, args ...interface{}) {
 			ts := time.Now().Format("15:04:05.000")
-			fmt.Fprintf(f, ts+" "+format+"\n", args...)
+			fmt.Fprintf(f, ts+" "+prefix+format+"\n", args...)
 			f.Sync()
 		}
-		debugLog("=== TUI debug log started (v3-lockfree) ===")
+
+		debugError = func(format string, args ...interface{}) { write("[ERROR] ", format, args...) }
+
+		if level == "2" {
+			debugLog = func(format string, args ...interface{}) { write("", format, args...) }
+			debugLog("=== TUI debug log started (verbose) ===")
+		} else {
+			debugLog = noop
+			debugError("=== TUI debug log started (errors only) ===")
+		}
 	} else {
-		debugLog = func(string, ...interface{}) {}
+		debugLog = noop
+		debugError = noop
 	}
 }
 
@@ -88,6 +105,9 @@ type App struct {
 
 	// Error tracking
 	errorTracker *ErrorTracker
+
+	// Provider health checking
+	healthChecker *providers.HealthChecker
 
 	// Core dependencies
 	config          *config.Config
@@ -196,6 +216,19 @@ func (a *App) GetTUIChannel() *TUIChannel {
 
 func (a *App) GetActivityTracker() *ActivityTracker {
 	return a.activityTracker
+}
+
+func (a *App) SetHealthChecker(hc *providers.HealthChecker) {
+	a.healthChecker = hc
+	hc.SetOnChange(func(statuses map[string]*providers.ProviderStatus) {
+		// Call refreshChannels directly — it already uses QueueUpdateDraw internally.
+		// Wrapping in QueueUpdate would nest queue operations and deadlock tview.
+		a.refreshChannels()
+	})
+}
+
+func (a *App) GetHealthChecker() *providers.HealthChecker {
+	return a.healthChecker
 }
 
 func (a *App) SetQATracker(qt *QATracker) {

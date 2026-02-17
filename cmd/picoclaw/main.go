@@ -671,7 +671,21 @@ func gatewayCmd() {
 		fmt.Printf("Error starting channels: %v\n", err)
 	}
 
+	// Start provider health checker
+	healthChecker := providers.NewHealthChecker(cfg, 60*time.Second)
+	go healthChecker.Start(ctx)
+	fmt.Println("✓ Provider health checker started")
+
 	healthServer := health.NewServer(cfg.Gateway.Host, cfg.Gateway.Port)
+	healthServer.RegisterDynamicCheck("providers", func() (bool, string) {
+		statuses := healthChecker.GetStatuses()
+		for _, s := range statuses {
+			if !s.Reachable {
+				return false, fmt.Sprintf("%s unreachable", s.Name)
+			}
+		}
+		return true, "all providers reachable"
+	})
 	go func() {
 		if err := healthServer.Start(); err != nil && err != http.ErrServerClosed {
 			logger.ErrorCF("health", "Health server error", map[string]interface{}{"error": err.Error()})
@@ -743,6 +757,11 @@ func tuiCmd() {
 	// All log output from service initialization will appear in the TUI logs panel.
 	go func() {
 		provider := providers.NewMultiProvider(cfg)
+
+		// Start provider health checker for TUI
+		healthChecker := providers.NewHealthChecker(cfg, 60*time.Second)
+		tuiApp.SetHealthChecker(healthChecker)
+		go healthChecker.Start(ctx)
 
 		agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
 		agentLoop.SetRouter(tuiRouter)
@@ -911,7 +930,12 @@ func statusCmd() {
 	}
 
 	if _, err := os.Stat(configPath); err == nil {
-		fmt.Printf("Model: %s\n", cfg.Agents.Defaults.Model)
+		modelName, prov := providers.ParseModelID(cfg.Agents.Defaults.Model)
+		if prov != "" {
+			fmt.Printf("Model: %s (provider: %s)\n", modelName, prov)
+		} else {
+			fmt.Printf("Model: %s\n", modelName)
+		}
 
 		hasOpenRouter := cfg.Providers.OpenRouter.APIKey != ""
 		hasAnthropic := cfg.Providers.Anthropic.APIKey != ""

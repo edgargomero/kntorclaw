@@ -130,10 +130,10 @@ func (a *App) refreshConfigItems(section int) {
 			debugLog("REFRESH model: default=%s", currentDefault)
 		}
 		for _, m := range models {
-			label := m
+			label := formatModelLabel(m)
 			secondary := ""
 			if m == currentDefault {
-				label = "[green]" + m + "[-]"
+				label = "[green]" + formatModelLabel(m) + "[-]"
 				secondary = "  [green](current default)[-]"
 			}
 			a.configItems.AddItem(label, secondary, 0, nil)
@@ -156,9 +156,9 @@ func (a *App) refreshConfigItems(section int) {
 		}
 		for _, ch := range channels {
 			if m, ok := channelModels[ch]; ok {
-				a.configItems.AddItem("[green]"+ch+"[-]", "  → [green]"+m+"[-]", 0, nil)
+				a.configItems.AddItem("[green]"+ch+"[-]", "  → [green]"+formatModelLabel(m)+"[-]", 0, nil)
 			} else {
-				a.configItems.AddItem(ch, "  → [gray]"+defaultModel+" (default)[-]", 0, nil)
+				a.configItems.AddItem(ch, "  → [gray]"+formatModelLabel(defaultModel)+" (default)[-]", 0, nil)
 			}
 		}
 		a.configInfo.Clear()
@@ -175,7 +175,7 @@ func (a *App) refreshConfigItems(section int) {
 			}
 			sort.Strings(keys)
 			for _, alias := range keys {
-				a.configItems.AddItem("[cyan]"+alias+"[-]", "  → "+aliases[alias], 0, nil)
+				a.configItems.AddItem("[cyan]"+alias+"[-]", "  → "+formatModelLabel(aliases[alias]), 0, nil)
 			}
 		}
 		// Add "new" entry at the end
@@ -195,8 +195,13 @@ func (a *App) handleConfigItemSelect() {
 		providers := a.getProviderList()
 		debugLog("SELECT providers: count=%d idx=%d", len(providers), idx)
 		if idx >= 0 && idx < len(providers) {
-			debugLog("SELECT opening API key input for: %s", providers[idx].name)
-			a.showAPIKeyInput(providers[idx].name)
+			selected := providers[idx].name
+			debugLog("SELECT opening editor for: %s", selected)
+			if selected == "anthropic-cc" {
+				a.showAuthProviderInfo(selected)
+			} else {
+				a.showAPIKeyInput(selected)
+			}
 		}
 
 	case configSectionModel:

@@ -22,9 +22,9 @@ func (a *App) renderConfig() {
 	fmt.Fprintf(a.configView, "[yellow]Provider:[white] %s\n", detectProvider(cfg))
 	if a.modelRouter != nil {
 		model, source := a.modelRouter.GetInfo("tui", "tui:local")
-		fmt.Fprintf(a.configView, "[yellow]Model:[white] %s [gray](%s)[-]\n", model, source)
+		fmt.Fprintf(a.configView, "[yellow]Model:[white] %s [gray](%s)[-]\n", formatModelLabel(model), source)
 	} else {
-		fmt.Fprintf(a.configView, "[yellow]Model:[white] %s\n", cfg.Agents.Defaults.Model)
+		fmt.Fprintf(a.configView, "[yellow]Model:[white] %s\n", formatModelLabel(cfg.Agents.Defaults.Model))
 	}
 	fmt.Fprintf(a.configView, "[yellow]Workspace:[white] %s\n", cfg.WorkspacePath())
 	fmt.Fprintf(a.configView, "[yellow]Max Tool Iterations:[white] %d\n", cfg.Agents.Defaults.MaxToolIterations)
@@ -52,7 +52,7 @@ func (a *App) renderConfig() {
 			}
 			sort.Strings(keys)
 			for _, ch := range keys {
-				fmt.Fprintf(a.configView, "  [green]%s[white] → %s\n", ch, channelModels[ch])
+				fmt.Fprintf(a.configView, "  [green]%s[white] → %s\n", ch, formatModelLabel(channelModels[ch]))
 			}
 		} else {
 			fmt.Fprintf(a.configView, "  [gray](none)[-]\n")
@@ -70,7 +70,7 @@ func (a *App) renderConfig() {
 			}
 			sort.Strings(keys)
 			for _, alias := range keys {
-				fmt.Fprintf(a.configView, "  [green]%s[white] → %s\n", alias, aliases[alias])
+				fmt.Fprintf(a.configView, "  [green]%s[white] → %s\n", alias, formatModelLabel(aliases[alias]))
 			}
 		} else {
 			fmt.Fprintf(a.configView, "  [gray](none)[-]\n")
