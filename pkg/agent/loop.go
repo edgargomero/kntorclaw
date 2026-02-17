@@ -60,6 +60,7 @@ type AgentLoop struct {
 	state          *state.Manager
 	contextBuilder *ContextBuilder
 	tools          *tools.ToolRegistry
+	toolModel      string   // Cheaper model for tool-call iterations (optional)
 	running        atomic.Bool
 	summarizing    sync.Map // Tracks which sessions are currently being summarized
 	onTokenUsage   func(sessionKey string, promptTokens, completionTokens int)
@@ -163,6 +164,7 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 		provider:       provider,
 		workspace:      workspace,
 		model:          cfg.Agents.Defaults.Model,
+		toolModel:      cfg.Agents.Defaults.ToolModel,
 		contextWindow:  cfg.Agents.Defaults.MaxTokens, // Restore context window for summarization
 		maxIterations:  cfg.Agents.Defaults.MaxToolIterations,
 		sessions:       sessionsManager,
@@ -496,6 +498,21 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.M
 				"max":       al.maxIterations,
 			})
 
+		// Resolve model for this iteration.
+		// When tool_model is configured, use it for ALL iterations that have tools
+		// available (i.e. every iteration except the very last one where the LLM
+		// returns a plain text answer with no tool calls). Since we cannot know
+		// ahead of time whether the current iteration will produce tool calls, we
+		// use tool_model for ALL iterations and rely on the fact that a capable
+		// cheap model (e.g. Haiku) can also write the final answer.
+		//
+		// If you want the primary model to write the final answer you can leave
+		// tool_model empty and the primary model is used throughout.
+		iterModel := model
+		if al.toolModel != "" {
+			iterModel = al.toolModel
+		}
+
 		// Build tool definitions
 		providerToolDefs := al.tools.ToProviderDefs()
 
@@ -503,7 +520,7 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.M
 		logger.DebugCF("agent", "LLM request",
 			map[string]interface{}{
 				"iteration":         iteration,
-				"model":             model,
+				"model":             iterModel,
 				"messages_count":    len(messages),
 				"tools_count":       len(providerToolDefs),
 				"max_tokens":        8192,
@@ -525,7 +542,7 @@ func (al *AgentLoop) runLLMIteration(ctx context.Context, messages []providers.M
 		// Retry loop for context/token errors
 		maxRetries := 2
 		for retry := 0; retry <= maxRetries; retry++ {
-			response, err = al.provider.Chat(ctx, messages, providerToolDefs, model, map[string]interface{}{
+			response, err = al.provider.Chat(ctx, messages, providerToolDefs, iterModel, map[string]interface{}{
 				"max_tokens":  8192,
 				"temperature": 0.7,
 			})
