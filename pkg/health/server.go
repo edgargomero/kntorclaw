@@ -10,11 +10,12 @@ import (
 )
 
 type Server struct {
-	server    *http.Server
-	mu        sync.RWMutex
-	ready     bool
-	checks    map[string]Check
-	startTime time.Time
+	server        *http.Server
+	mu            sync.RWMutex
+	ready         bool
+	checks        map[string]Check
+	dynamicChecks map[string]func() (bool, string)
+	startTime     time.Time
 }
 
 type Check struct {
@@ -33,9 +34,10 @@ type StatusResponse struct {
 func NewServer(host string, port int) *Server {
 	mux := http.NewServeMux()
 	s := &Server{
-		ready:     false,
-		checks:    make(map[string]Check),
-		startTime: time.Now(),
+		ready:         false,
+		checks:        make(map[string]Check),
+		dynamicChecks: make(map[string]func() (bool, string)),
+		startTime:     time.Now(),
 	}
 
 	mux.HandleFunc("/health", s.healthHandler)
@@ -103,6 +105,14 @@ func (s *Server) RegisterCheck(name string, checkFn func() (bool, string)) {
 	}
 }
 
+// RegisterDynamicCheck registers a check function that is evaluated on every
+// /ready request, rather than once at registration time.
+func (s *Server) RegisterDynamicCheck(name string, checkFn func() (bool, string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dynamicChecks[name] = checkFn
+}
+
 func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -125,7 +135,22 @@ func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
 	for k, v := range s.checks {
 		checks[k] = v
 	}
+	dynamicChecks := make(map[string]func() (bool, string))
+	for k, v := range s.dynamicChecks {
+		dynamicChecks[k] = v
+	}
 	s.mu.RUnlock()
+
+	// Evaluate dynamic checks on each request
+	for name, checkFn := range dynamicChecks {
+		status, msg := checkFn()
+		checks[name] = Check{
+			Name:      name,
+			Status:    statusString(status),
+			Message:   msg,
+			Timestamp: time.Now(),
+		}
+	}
 
 	if !ready {
 		w.WriteHeader(http.StatusServiceUnavailable)
