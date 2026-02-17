@@ -24,15 +24,24 @@ import (
 	"github.com/sipeed/picoclaw/pkg/voice"
 )
 
+// checkpointApprover is the minimal interface needed from CheckpointTool.
+type checkpointApprover interface {
+	Approve()
+	Reject()
+}
+
 type TelegramChannel struct {
 	*BaseChannel
-	bot          *telego.Bot
-	commands     TelegramCommander
-	config       *config.Config
-	chatIDs      map[string]int64
-	transcriber  *voice.GroqTranscriber
-	placeholders sync.Map // chatID -> messageID
-	stopThinking sync.Map // chatID -> thinkingCancel
+	bot            *telego.Bot
+	commands       TelegramCommander
+	config         *config.Config
+	chatIDs        map[string]int64
+	transcriber    *voice.GroqTranscriber
+	placeholders   sync.Map // chatID -> messageID
+	stopThinking   sync.Map // chatID -> thinkingCancel
+	checkpointTool checkpointApprover
+	pendingMu      sync.Mutex
+	pendingChatID  int64 // chat that has an active checkpoint waiting
 }
 
 type thinkingCancel struct {
@@ -84,6 +93,32 @@ func (c *TelegramChannel) SetTranscriber(transcriber *voice.GroqTranscriber) {
 	c.transcriber = transcriber
 }
 
+// SetCheckpointTool connects a CheckpointTool so Telegram can act as an
+// approval channel. When the agent calls checkpoint, call NotifyCheckpoint
+// to send the operator a message; /approve or /reject then unblocks the agent.
+func (c *TelegramChannel) SetCheckpointTool(ct checkpointApprover) {
+	c.checkpointTool = ct
+}
+
+// NotifyCheckpoint sends a checkpoint approval request to chatID.
+// Designed to be wrapped in a closure and passed to CheckpointTool.SetNotifyFunc.
+func (c *TelegramChannel) NotifyCheckpoint(ctx context.Context, chatID int64, msg string) {
+	c.pendingMu.Lock()
+	c.pendingChatID = chatID
+	c.pendingMu.Unlock()
+
+	text := "🔐 *Checkpoint — approval required*\n\n" + msg + "\n\nReply /approve or /reject"
+	if _, err := c.bot.SendMessage(ctx, &telego.SendMessageParams{
+		ChatID:    telego.ChatID{ID: chatID},
+		Text:      text,
+		ParseMode: telego.ModeMarkdown,
+	}); err != nil {
+		logger.ErrorCF("telegram", "Failed to send checkpoint notification", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
+}
+
 func (c *TelegramChannel) Start(ctx context.Context) error {
 	logger.InfoC("telegram", "Starting Telegram bot (polling mode)...")
 
@@ -116,6 +151,20 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 	}, th.CommandEqual("list"))
 
 	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
+		if message.From != nil && c.IsAllowed(fmt.Sprintf("%d", message.From.ID)) {
+			c.approveCheckpoint(ctx, message.Chat.ID)
+		}
+		return nil
+	}, th.CommandEqual("approve"))
+
+	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
+		if message.From != nil && c.IsAllowed(fmt.Sprintf("%d", message.From.ID)) {
+			c.rejectCheckpoint(ctx, message.Chat.ID)
+		}
+		return nil
+	}, th.CommandEqual("reject"))
+
+	bh.HandleMessage(func(ctx *th.Context, message telego.Message) error {
 		return c.handleMessage(ctx, &message)
 	}, th.AnyMessage())
 
@@ -133,6 +182,50 @@ func (c *TelegramChannel) Start(ctx context.Context) error {
 
 	return nil
 }
+func (c *TelegramChannel) approveCheckpoint(ctx context.Context, chatID int64) {
+	c.pendingMu.Lock()
+	pending := c.pendingChatID
+	c.pendingChatID = 0
+	c.pendingMu.Unlock()
+
+	if pending == 0 {
+		c.bot.SendMessage(ctx, &telego.SendMessageParams{ //nolint:errcheck
+			ChatID: telego.ChatID{ID: chatID},
+			Text:   "ℹ️ No pending checkpoint.",
+		})
+		return
+	}
+	if c.checkpointTool != nil {
+		c.checkpointTool.Approve()
+	}
+	c.bot.SendMessage(ctx, &telego.SendMessageParams{ //nolint:errcheck
+		ChatID: telego.ChatID{ID: chatID},
+		Text:   "✅ Checkpoint approved.",
+	})
+}
+
+func (c *TelegramChannel) rejectCheckpoint(ctx context.Context, chatID int64) {
+	c.pendingMu.Lock()
+	pending := c.pendingChatID
+	c.pendingChatID = 0
+	c.pendingMu.Unlock()
+
+	if pending == 0 {
+		c.bot.SendMessage(ctx, &telego.SendMessageParams{ //nolint:errcheck
+			ChatID: telego.ChatID{ID: chatID},
+			Text:   "ℹ️ No pending checkpoint.",
+		})
+		return
+	}
+	if c.checkpointTool != nil {
+		c.checkpointTool.Reject()
+	}
+	c.bot.SendMessage(ctx, &telego.SendMessageParams{ //nolint:errcheck
+		ChatID: telego.ChatID{ID: chatID},
+		Text:   "❌ Checkpoint rejected.",
+	})
+}
+
 func (c *TelegramChannel) Stop(ctx context.Context) error {
 	logger.InfoC("telegram", "Stopping Telegram bot...")
 	c.SetRunning(false)

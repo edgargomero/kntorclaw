@@ -2,10 +2,19 @@ package tools
 
 import "context"
 
+// CheckpointNotifyFunc is called when the agent requests human approval.
+// It receives the checkpoint message so external channels (e.g. Telegram)
+// can notify the operator and wait for their response.
+type CheckpointNotifyFunc func(message string)
+
 // CheckpointTool blocks the agent until human approval is received.
 // The TUI sends approval/rejection via the internal channel.
+// An optional NotifyFunc can be set to forward the request to an external channel.
 type CheckpointTool struct {
 	approvalCh chan bool
+	// NotifyFunc, if set, is called when Execute blocks waiting for approval.
+	// Use SetNotifyFunc to register external approval channels (e.g. Telegram).
+	NotifyFunc CheckpointNotifyFunc
 }
 
 // NewCheckpointTool creates a new CheckpointTool.
@@ -13,6 +22,13 @@ func NewCheckpointTool() *CheckpointTool {
 	return &CheckpointTool{
 		approvalCh: make(chan bool, 1),
 	}
+}
+
+// SetNotifyFunc registers a callback that is invoked when the agent calls
+// checkpoint. The callback should notify the operator (e.g. send a Telegram
+// message) so they can approve or reject via /approve or /reject.
+func (t *CheckpointTool) SetNotifyFunc(fn CheckpointNotifyFunc) {
+	t.NotifyFunc = fn
 }
 
 func (t *CheckpointTool) Name() string {
@@ -40,6 +56,11 @@ func (t *CheckpointTool) Execute(ctx context.Context, args map[string]interface{
 	message, _ := args["message"].(string)
 	if message == "" {
 		message = "Waiting for human approval..."
+	}
+
+	// Notify external channel (e.g. Telegram) if configured.
+	if t.NotifyFunc != nil {
+		t.NotifyFunc(message)
 	}
 
 	// Block until approval or context cancellation

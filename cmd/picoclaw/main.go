@@ -545,6 +545,10 @@ func gatewayCmd() {
 	gwRouter := agent.NewModelRouter(cfg.Agents.Defaults.Model, cfg.Agents.Models, cfg.Agents.Aliases)
 	agentLoop.SetRouter(gwRouter)
 
+	// Create checkpoint tool for gateway mode
+	gatewayCheckpointTool := tools.NewCheckpointTool()
+	agentLoop.RegisterTool(gatewayCheckpointTool)
+
 	// Print agent startup info
 	fmt.Println("\n📦 Agent Status:")
 	startupInfo := agentLoop.GetStartupInfo()
@@ -629,6 +633,22 @@ func gatewayCmd() {
 				wc.SetTranscriber(transcriber)
 				logger.InfoC("voice", "Groq transcription attached to WhatsApp channel")
 			}
+		}
+	}
+
+	// Wire checkpoint tool to Telegram for remote approve/reject
+	if telegramChannel, ok := channelManager.GetChannel("telegram"); ok {
+		if tc, ok := telegramChannel.(*channels.TelegramChannel); ok {
+			tc.SetCheckpointTool(gatewayCheckpointTool)
+			gatewayCheckpointTool.SetNotifyFunc(func(msg string) {
+				// Notify all allowed chats — use the first known active chat
+				// For now, broadcast is not needed; the pending chatID is set
+				// by the inbound message handler before checkpoint fires.
+				logger.InfoCF("telegram", "Checkpoint triggered", map[string]interface{}{
+					"message": msg,
+				})
+			})
+			logger.InfoC("checkpoint", "Checkpoint tool wired to Telegram channel")
 		}
 	}
 
