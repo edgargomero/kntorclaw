@@ -202,16 +202,17 @@ func (cb *ContextBuilder) BuildMessages(history []providers.Message, summary str
 		systemPrompt += "\n\n## Summary of Previous Conversation\n\n" + summary
 	}
 
-	//This fix prevents the session memory from LLM failure due to elimination of toolu_IDs required from LLM
-	// --- INICIO DEL FIX ---
-	//Diegox-17
+	// Remove orphaned tool messages from start of history
 	for len(history) > 0 && (history[0].Role == "tool") {
-		logger.DebugCF("agent", "Removing orphaned tool message from history to prevent LLM error",
+		logger.DebugCF("agent", "Removing orphaned tool message from history start",
 			map[string]interface{}{"role": history[0].Role})
 		history = history[1:]
 	}
-	//Diegox-17
-	// --- FIN DEL FIX ---
+
+	// Remove tool_result messages whose tool_use_id has no matching tool_use in
+	// any prior assistant message. This happens when switching providers mid-session
+	// (e.g. OpenAI tool IDs like "chatcmpl-tool-..." are invalid for Claude).
+	history = sanitizeOrphanedToolResults(history)
 
 	messages = append(messages, providers.Message{
 		Role:    "system",
@@ -327,4 +328,78 @@ func (cb *ContextBuilder) GetSkillsInfo() map[string]interface{} {
 		"available": len(allSkills),
 		"names":     skillNames,
 	}
+}
+
+// sanitizeOrphanedToolResults removes tool_result messages whose tool_use_id
+// doesn't match any tool_use in the history's assistant messages. Also removes
+// assistant tool_use messages whose results are missing. This prevents errors
+// when switching providers mid-session (e.g. OpenAI → Claude).
+func sanitizeOrphanedToolResults(history []providers.Message) []providers.Message {
+	// Collect all tool_use IDs from assistant messages
+	toolUseIDs := make(map[string]bool)
+	for _, msg := range history {
+		if msg.Role == "assistant" {
+			for _, tc := range msg.ToolCalls {
+				if tc.ID != "" {
+					toolUseIDs[tc.ID] = true
+				}
+			}
+		}
+	}
+
+	// Collect all tool_result IDs
+	toolResultIDs := make(map[string]bool)
+	for _, msg := range history {
+		if (msg.Role == "tool" || msg.Role == "user") && msg.ToolCallID != "" {
+			toolResultIDs[msg.ToolCallID] = true
+		}
+	}
+
+	// Filter: keep messages that aren't orphaned
+	var cleaned []providers.Message
+	dropped := 0
+	for _, msg := range history {
+		// Drop tool_result without matching tool_use
+		if (msg.Role == "tool" || (msg.Role == "user" && msg.ToolCallID != "")) && msg.ToolCallID != "" {
+			if !toolUseIDs[msg.ToolCallID] {
+				dropped++
+				logger.DebugCF("agent", "Dropping orphaned tool_result",
+					map[string]interface{}{"tool_call_id": msg.ToolCallID})
+				continue
+			}
+		}
+
+		// Drop assistant tool_use messages if ALL their tool results are missing
+		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
+			allMissing := true
+			for _, tc := range msg.ToolCalls {
+				if toolResultIDs[tc.ID] {
+					allMissing = false
+					break
+				}
+			}
+			if allMissing {
+				// Keep the text content but strip the tool calls
+				if msg.Content != "" {
+					cleaned = append(cleaned, providers.Message{
+						Role:    "assistant",
+						Content: msg.Content,
+					})
+				}
+				dropped++
+				logger.DebugCF("agent", "Stripping orphaned tool_use from assistant message",
+					map[string]interface{}{"tool_count": len(msg.ToolCalls)})
+				continue
+			}
+		}
+
+		cleaned = append(cleaned, msg)
+	}
+
+	if dropped > 0 {
+		logger.DebugCF("agent", "Sanitized history: dropped orphaned tool messages",
+			map[string]interface{}{"dropped": dropped, "remaining": len(cleaned)})
+	}
+
+	return cleaned
 }
