@@ -28,12 +28,16 @@ func NewMultiProvider(cfg *config.Config) *MultiProvider {
 }
 
 // Chat dispatches the request to the correct provider for the given model.
+// The @provider suffix (if present) is used for routing but stripped before
+// sending to the LLM API.
 func (mp *MultiProvider) Chat(ctx context.Context, messages []Message, tools []ToolDefinition, model string, options map[string]interface{}) (*LLMResponse, error) {
 	provider, err := mp.getProvider(model)
 	if err != nil {
 		return nil, fmt.Errorf("resolving provider for model %q: %w", model, err)
 	}
-	return provider.Chat(ctx, messages, tools, model, options)
+	// Strip @provider before sending to the actual LLM
+	cleanModel, _ := ParseModelID(model)
+	return provider.Chat(ctx, messages, tools, cleanModel, options)
 }
 
 // GetDefaultModel returns the default model from config.
@@ -84,7 +88,14 @@ func (mp *MultiProvider) resolveProviderKey(model string) string {
 
 // ResolveProviderKey determines which provider key to use for a given model name
 // and config. Exported so other packages (e.g. TUI) can reuse the same logic.
-func ResolveProviderKey(cfg *config.Config, model string) string {
+// If the model contains an explicit @provider suffix (e.g. "z-ai/glm5@nvidia"),
+// that provider is returned directly without guessing.
+func ResolveProviderKey(cfg *config.Config, rawModel string) string {
+	model, explicit := ParseModelID(rawModel)
+	if explicit != "" {
+		return strings.ToLower(explicit)
+	}
+
 	providerName := strings.ToLower(cfg.Agents.Defaults.Provider)
 	lowerModel := strings.ToLower(model)
 
@@ -168,6 +179,8 @@ func (mp *MultiProvider) getAPIKeyForProvider(providerKey string) string {
 		return cfg.Providers.OpenRouter.APIKey
 	case "anthropic", "claude":
 		return cfg.Providers.Anthropic.APIKey + cfg.Providers.Anthropic.AuthMethod
+	case "anthropic-cc":
+		return cfg.Providers.Anthropic.AuthMethod
 	case "openai", "gpt":
 		return cfg.Providers.OpenAI.APIKey + cfg.Providers.OpenAI.AuthMethod
 	case "gemini", "google":

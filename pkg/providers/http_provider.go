@@ -224,8 +224,16 @@ func createCodexAuthProvider() (LLMProvider, error) {
 
 // CreateProviderForModel creates an LLMProvider for a specific model name,
 // using the config to determine the correct provider and credentials.
-func CreateProviderForModel(cfg *config.Config, model string) (LLMProvider, error) {
+// If the model contains an explicit @provider suffix (e.g. "z-ai/glm5@nvidia"),
+// that provider is used directly instead of guessing from the model name.
+func CreateProviderForModel(cfg *config.Config, rawModel string) (LLMProvider, error) {
+	model, explicitProvider := ParseModelID(rawModel)
 	providerName := strings.ToLower(cfg.Agents.Defaults.Provider)
+
+	// Explicit @provider takes priority over the config default provider
+	if explicitProvider != "" {
+		providerName = strings.ToLower(explicitProvider)
+	}
 
 	var apiKey, apiBase, proxy string
 
@@ -305,7 +313,9 @@ func CreateProviderForModel(cfg *config.Config, model string) (LLMProvider, erro
 					apiBase = "https://router.shengsuanyun.com/api/v1"
 				}
 			}
-		case "claude-cli", "claudecode", "claude-code":
+		case "anthropic-cc":
+		return createClaudeAuthProvider()
+	case "claude-cli", "claudecode", "claude-code":
 			workspace := cfg.WorkspacePath()
 			if workspace == "" {
 				workspace = "."
@@ -406,7 +416,7 @@ func CreateProviderForModel(cfg *config.Config, model string) (LLMProvider, erro
 				apiBase = "https://api.groq.com/openai/v1"
 			}
 
-		case (strings.Contains(lowerModel, "nvidia") || strings.HasPrefix(model, "nvidia/")) && cfg.Providers.Nvidia.APIKey != "":
+		case (strings.Contains(lowerModel, "nvidia") || strings.HasPrefix(model, "nvidia/") || strings.HasPrefix(model, "z-ai/")) && cfg.Providers.Nvidia.APIKey != "":
 			apiKey = cfg.Providers.Nvidia.APIKey
 			apiBase = cfg.Providers.Nvidia.APIBase
 			proxy = cfg.Providers.Nvidia.Proxy

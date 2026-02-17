@@ -7,6 +7,7 @@ import (
 
 	"github.com/mymmrac/telego"
 	"github.com/sipeed/picoclaw/pkg/config"
+	"github.com/sipeed/picoclaw/pkg/providers"
 )
 
 type TelegramCommander interface {
@@ -78,9 +79,14 @@ func (c *cmd) Show(ctx context.Context, message telego.Message) error {
 	var response string
 	switch args {
 	case "model":
-		response = fmt.Sprintf("Current Model: %s (Provider: %s)",
-			c.config.Agents.Defaults.Model,
-			c.config.Agents.Defaults.Provider)
+		modelName, prov := providers.ParseModelID(c.config.Agents.Defaults.Model)
+		if prov == "" {
+			prov = c.config.Agents.Defaults.Provider
+		}
+		if prov == "" {
+			prov = providers.ResolveProviderKey(c.config, c.config.Agents.Defaults.Model)
+		}
+		response = fmt.Sprintf("Current Model: %s (Provider: %s)", modelName, prov)
 	case "channel":
 		response = "Current Channel: telegram"
 	default:
@@ -112,12 +118,15 @@ func (c *cmd) List(ctx context.Context, message telego.Message) error {
 	var response string
 	switch args {
 	case "models":
-		provider := c.config.Agents.Defaults.Provider
-		if provider == "" {
-			provider = "configured default"
+		modelName, prov := providers.ParseModelID(c.config.Agents.Defaults.Model)
+		if prov == "" {
+			prov = c.config.Agents.Defaults.Provider
+		}
+		if prov == "" {
+			prov = "configured default"
 		}
 		response = fmt.Sprintf("Configured Model: %s\nProvider: %s\n\nTo change models, update config.yaml",
-			c.config.Agents.Defaults.Model, provider)
+			modelName, prov)
 
 	case "channels":
 		var enabled []string
