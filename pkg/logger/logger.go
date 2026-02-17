@@ -164,7 +164,9 @@ func formatComponent(component string) string {
 func formatFields(fields map[string]interface{}) string {
 	var parts []string
 	for k, v := range fields {
-		parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+		s := fmt.Sprintf("%v", v)
+		s = strings.ReplaceAll(s, "\n", " ")
+		parts = append(parts, fmt.Sprintf("%s=%s", k, s))
 	}
 	return fmt.Sprintf("{%s}", strings.Join(parts, ", "))
 }
