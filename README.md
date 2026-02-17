@@ -247,10 +247,15 @@ Talk to your picoclaw through Telegram, Discord, DingTalk, or LINE
 | Channel      | Setup                              |
 | ------------ | ---------------------------------- |
 | **Telegram** | Easy (just a token)                |
+| **WhatsApp** | Easy (QR code login)               |
 | **Discord**  | Easy (bot token + intents)         |
+| **Slack**    | Easy (bot token)                   |
 | **QQ**       | Easy (AppID + AppSecret)           |
 | **DingTalk** | Medium (app credentials)           |
 | **LINE**     | Medium (credentials + webhook URL) |
+| **Feishu/Lark** | Medium (app credentials)        |
+
+Telegram supports **checkpoint approval** — when the agent needs human confirmation (e.g. before executing destructive operations), it sends a message to the operator who can `/approve` or `/reject`.
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -657,13 +662,18 @@ The subagent has access to tools (message, web_search, etc.) and can communicate
 
 | Provider                   | Purpose                                 | Get API Key                                            |
 | -------------------------- | --------------------------------------- | ------------------------------------------------------ |
+| `anthropic`                | LLM (Claude direct, API key)            | [console.anthropic.com](https://console.anthropic.com) |
+| `anthropic-cc`             | LLM (Claude via Claude Code auth token) | Run `claude setup-token` in Claude Code CLI            |
+| `openai`                   | LLM (GPT direct)                        | [platform.openai.com](https://platform.openai.com)     |
+| `openrouter`               | LLM (access to all models)              | [openrouter.ai](https://openrouter.ai)                 |
 | `gemini`                   | LLM (Gemini direct)                     | [aistudio.google.com](https://aistudio.google.com)     |
 | `zhipu`                    | LLM (Zhipu direct)                      | [bigmodel.cn](bigmodel.cn)                             |
-| `openrouter(To be tested)` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai)                 |
-| `anthropic(To be tested)`  | LLM (Claude direct)                     | [console.anthropic.com](https://console.anthropic.com) |
-| `openai(To be tested)`     | LLM (GPT direct)                        | [platform.openai.com](https://platform.openai.com)     |
-| `deepseek(To be tested)`   | LLM (DeepSeek direct)                   | [platform.deepseek.com](https://platform.deepseek.com) |
+| `deepseek`                 | LLM (DeepSeek direct)                   | [platform.deepseek.com](https://platform.deepseek.com) |
 | `groq`                     | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com)           |
+| `nvidia`                   | LLM (NVIDIA NIM)                        | [build.nvidia.com](https://build.nvidia.com)           |
+| `moonshot`                 | LLM (Kimi / Moonshot)                   | [platform.moonshot.cn](https://platform.moonshot.cn)   |
+| `ollama`                   | LLM (local, self-hosted)                | [ollama.com](https://ollama.com)                       |
+| `vllm`                     | LLM (local, self-hosted)                | Self-hosted                                            |
 
 <details>
 <summary><b>Zhipu</b></summary>
@@ -779,26 +789,78 @@ PicoClaw supports per-channel model routing, so each channel (Telegram, WhatsApp
 2. **Channel override** — persisted in config under `agents.models`
 3. **Default model** — `agents.defaults.model` fallback
 
+#### Explicit `@provider` Syntax
+
+Use `model@provider` to pin a model to a specific provider, avoiding ambiguity:
+
+```
+claude-sonnet-4-5-20250929@anthropic      # API key
+claude-sonnet-4-5-20250929@anthropic-cc   # Claude Code setup-token
+claude-sonnet-4-5-20250929@openrouter     # via OpenRouter
+gpt-4o@openai                             # direct OpenAI
+z-ai/glm5@nvidia                          # NVIDIA NIM
+```
+
+Without `@provider`, the provider is auto-detected from the model name (`claude*` → Anthropic, `gpt*` → OpenAI, `glm*` → Zhipu, etc.).
+
+#### Tool Model (Cost Optimization)
+
+Use `tool_model` to route tool-call iterations to a cheaper/faster model while keeping the primary model for final answers:
+
 ```json
 {
   "agents": {
     "defaults": {
-      "model": "glm-4.7"
-    },
-    "models": {
-      "whatsapp": "claude-sonnet-4-5-20250929",
-      "telegram": "gpt-4o",
-      "tui": "claude-opus-4-6"
-    },
-    "aliases": {
-      "opus": "claude-opus-4-6",
-      "sonnet": "claude-sonnet-4-5-20250929"
+      "model": "claude-opus-4-6@anthropic-cc",
+      "tool_model": "claude-haiku-4-5-20251001@anthropic-cc"
     }
   }
 }
 ```
 
-The provider is auto-detected from the model name (`claude*` → Anthropic, `gpt*` → OpenAI, `glm*` → Zhipu, etc.).
+#### Example Config
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "claude-sonnet-4-5-20250929@anthropic-cc",
+      "tool_model": "claude-haiku-4-5-20251001@anthropic-cc"
+    },
+    "models": {
+      "whatsapp": "claude-sonnet-4-5-20250929@anthropic-cc",
+      "telegram": "gpt-4o@openai",
+      "tui": "claude-opus-4-6@anthropic-cc"
+    },
+    "aliases": {
+      "opus": "claude-opus-4-6@anthropic-cc",
+      "sonnet": "claude-sonnet-4-5-20250929@anthropic-cc"
+    }
+  }
+}
+```
+
+#### Claude Code Auth (`anthropic-cc`)
+
+Use Claude Code's setup-token instead of an API key:
+
+1. Run `claude setup-token` in Claude Code CLI to get your token
+2. In the TUI (`F8` → Providers → `anthropic-cc`), paste the token
+3. Use models with `@anthropic-cc` suffix
+
+Or configure manually in `config.json`:
+
+```json
+{
+  "providers": {
+    "anthropic": {
+      "auth_method": "setup-token"
+    }
+  }
+}
+```
+
+Then run `picoclaw auth login --provider anthropic` and paste the token.
 
 ### Token Usage Tracking
 
@@ -813,6 +875,8 @@ When running `picoclaw gateway`, the TUI provides a multi-panel dashboard with t
 | Normal | default | Chat + Channels/Tokens/Sessions/Logs panels |
 | Config | `F8` | Interactive config editor for providers, models, channels, aliases |
 | Focus | `F9` | Git-style layout with Files/Branches/Commits/QA + Chat/Diff |
+
+The CHANNELS panel shows real-time provider health status with color-coded indicators (green = LLM ready, yellow = reachable but probe failed, red = unreachable).
 
 #### Keybindings
 
