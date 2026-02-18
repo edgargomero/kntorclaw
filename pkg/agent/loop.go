@@ -159,6 +159,15 @@ func NewAgentLoop(cfg *config.Config, msgBus *bus.MessageBus, provider providers
 	contextBuilder := NewContextBuilder(workspace)
 	contextBuilder.SetToolsRegistry(toolsRegistry)
 
+	// Register solve tool (autonomous 4-phase pipeline, silent to user).
+	// Must be registered after contextBuilder so the skill loader is available.
+	solveTool := tools.NewSolveTool(tools.SolveToolOptions{
+		Manager:       subagentManager,
+		WorkspacePath: workspace,
+		SkillLoader:   contextBuilder.GetSkillLoader(),
+	})
+	toolsRegistry.Register(solveTool)
+
 	return &AgentLoop{
 		bus:            msgBus,
 		provider:       provider,
@@ -750,6 +759,11 @@ func (al *AgentLoop) updateToolContexts(channel, chatID string) {
 		}
 	}
 	if tool, ok := al.tools.Get("subagent"); ok {
+		if st, ok := tool.(tools.ContextualTool); ok {
+			st.SetContext(channel, chatID)
+		}
+	}
+	if tool, ok := al.tools.Get("solve"); ok {
 		if st, ok := tool.(tools.ContextualTool); ok {
 			st.SetContext(channel, chatID)
 		}

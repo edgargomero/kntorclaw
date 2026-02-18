@@ -88,14 +88,95 @@ func (sm *SubagentManager) Spawn(ctx context.Context, task, label, originChannel
 	return fmt.Sprintf("Spawned subagent for task: %s", task), nil
 }
 
+// defaultSubagentPrompt is the generic system prompt used when no custom soul
+// is specified.
+const defaultSubagentPrompt = `You are a subagent. Complete the given task independently and report the result.
+You have access to tools - use them as needed to complete your task.
+After completing the task, provide a clear summary of what was done.`
+
+// SubagentConfig allows per-task overrides of subagent behaviour.
+// Zero values fall back to the manager's defaults.
+type SubagentConfig struct {
+	SystemPrompt   string  // Replaces defaultSubagentPrompt when non-empty
+	Model          string  // Overrides manager.defaultModel when non-empty
+	MaxIterations  int     // 0 → manager.maxIterations
+	MaxTokens      int     // 0 → 4096
+	Temperature    float64 // 0 → 0.7
+	PlanningPrompt string  // If non-empty, runs a planning step before the loop
+}
+
+// Provider returns the LLM provider used by the manager.
+func (sm *SubagentManager) Provider() providers.LLMProvider {
+	return sm.provider
+}
+
+// DefaultModel returns the default model configured for the manager.
+func (sm *SubagentManager) DefaultModel() string {
+	return sm.defaultModel
+}
+
+// RunWithConfig runs a task synchronously using the given config overrides
+// and returns the ToolLoopResult. This is used by SolveTool for inline
+// subagent execution without spawning a goroutine.
+func (sm *SubagentManager) RunWithConfig(ctx context.Context, task string, cfg *SubagentConfig, channel, chatID string) (*ToolLoopResult, error) {
+	systemPrompt := defaultSubagentPrompt
+	if cfg != nil && cfg.SystemPrompt != "" {
+		systemPrompt = cfg.SystemPrompt
+	}
+
+	model := sm.defaultModel
+	if cfg != nil && cfg.Model != "" {
+		model = cfg.Model
+	}
+
+	maxIter := sm.maxIterations
+	if cfg != nil && cfg.MaxIterations > 0 {
+		maxIter = cfg.MaxIterations
+	}
+
+	maxTok := 4096
+	if cfg != nil && cfg.MaxTokens > 0 {
+		maxTok = cfg.MaxTokens
+	}
+
+	temp := 0.7
+	if cfg != nil && cfg.Temperature > 0 {
+		temp = cfg.Temperature
+	}
+
+	planningPrompt := ""
+	if cfg != nil {
+		planningPrompt = cfg.PlanningPrompt
+	}
+
+	messages := []providers.Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: task},
+	}
+
+	sm.mu.RLock()
+	tools := sm.tools
+	sm.mu.RUnlock()
+
+	return RunToolLoop(ctx, ToolLoopConfig{
+		Provider:       sm.provider,
+		Model:          model,
+		Tools:          tools,
+		MaxIterations:  maxIter,
+		PlanningPrompt: planningPrompt,
+		LLMOptions: map[string]any{
+			"max_tokens":  maxTok,
+			"temperature": temp,
+		},
+	}, messages, channel, chatID)
+}
+
 func (sm *SubagentManager) runTask(ctx context.Context, task *SubagentTask, callback AsyncCallback) {
 	task.Status = "running"
 	task.Created = time.Now().UnixMilli()
 
 	// Build system prompt for subagent
-	systemPrompt := `You are a subagent. Complete the given task independently and report the result.
-You have access to tools - use them as needed to complete your task.
-After completing the task, provide a clear summary of what was done.`
+	systemPrompt := defaultSubagentPrompt
 
 	messages := []providers.Message{
 		{
