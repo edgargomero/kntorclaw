@@ -39,6 +39,8 @@ import (
 	"github.com/sipeed/picoclaw/pkg/state"
 	"github.com/sipeed/picoclaw/pkg/tools"
 	"github.com/sipeed/picoclaw/pkg/tui"
+	"github.com/sipeed/picoclaw/pkg/tui/domain"
+	"github.com/sipeed/picoclaw/pkg/tui/organisms"
 	"github.com/sipeed/picoclaw/pkg/voice"
 )
 
@@ -136,6 +138,8 @@ func main() {
 		agentCmd()
 	case "gateway":
 		gatewayCmd()
+	case "tui-bb":
+		tuiBubbleteaCmd()
 	case "status":
 		statusCmd()
 	case "migrate":
@@ -1691,4 +1695,367 @@ func skillsShowCmd(loader *skills.SkillsLoader, skillName string) {
 	fmt.Printf("\n📦 Skill: %s\n", skillName)
 	fmt.Println("----------------------")
 	fmt.Println(content)
+}
+
+// tuiBubbleteaCmd launches the TUI using bubbletea instead of tview.
+// It mirrors tuiCmd() but uses the bubbletea-based UI.
+func tuiBubbleteaCmd() {
+	for _, arg := range os.Args[1:] {
+		if arg == "--debug" || arg == "-d" {
+			logger.SetLevel(logger.DEBUG)
+			break
+		}
+	}
+
+	cfg, err := loadConfig()
+	if err != nil {
+		fmt.Printf("Error loading config: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Detect project mode: if cwd is a git repo, use it as workspace
+	cwd, _ := os.Getwd()
+	gitTopCmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	gitTopCmd.Dir = cwd
+	if out, err := gitTopCmd.Output(); err == nil {
+		projectRoot := strings.TrimSpace(string(out))
+		cfg.Agents.Defaults.Workspace = projectRoot
+		cfg.Agents.Defaults.RestrictToWorkspace = false
+		logger.InfoC("tui-bb", "Project mode: "+projectRoot)
+	}
+
+	msgBus := bus.NewMessageBus()
+
+	// Create model router
+	tuiRouter := agent.NewModelRouter(cfg.Agents.Defaults.Model, cfg.Agents.Models, cfg.Agents.Aliases)
+
+	// Create checkpoint tool before app so QA tracker can be wired pre-Run
+	checkpointTool := tools.NewCheckpointTool()
+	qaTracker := domain.NewQATracker(checkpointTool)
+
+	// Create bubbletea app with message bus
+	btApp := tui.NewBubbleteaApp(msgBus)
+
+	// Set error tracker path
+	configPath := getConfigPath()
+	if configPath != "" {
+		errLogPath := filepath.Join(filepath.Dir(configPath), "errors.log")
+		btApp.SetErrorLogPath(errLogPath)
+	}
+
+	// Wire model router (populates model picker data + selection callback)
+	btApp.SetModelRouter(tuiRouter)
+
+	// Wire QA tracker for focus mode
+	btApp.SetQATracker(qaTracker)
+
+	// Wire workspace path for sessions disk merge
+	btApp.SetWorkspacePath(cfg.WorkspacePath())
+
+	// Wire token usage path for historical totals
+	usagePath := filepath.Join(filepath.Dir(configPath), "token_usage.json")
+	btApp.SetUsagePath(usagePath)
+
+	// Wire config callbacks for the config page (F8)
+	btApp.SetConfigCallbacks(buildConfigCallbacks(cfg, configPath, tuiRouter))
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Start all services in a goroutine so bubbletea can take control of the terminal.
+	go func() {
+		provider := providers.NewMultiProvider(cfg)
+
+		// Start provider health checker
+		healthChecker := providers.NewHealthChecker(cfg, 60*time.Second)
+		btApp.SetHealthChecker(healthChecker)
+		go healthChecker.Start(ctx)
+
+		agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
+		agentLoop.SetRouter(tuiRouter)
+
+		// Register checkpoint tool with agent loop
+		agentLoop.RegisterTool(checkpointTool)
+
+		// Wire activity and token tracking
+		activityTracker := btApp.GetTracker()
+		agentLoop.SetOnActivity(func(event agent.ActivityEvent) {
+			switch event.Type {
+			case "processing":
+				activityTracker.SetProcessing(event.SessionKey)
+			case "tool_call":
+				activityTracker.SetToolCall(event.SessionKey, event.ToolName)
+			case "idle":
+				activityTracker.SetIdle(event.SessionKey, event.Preview, event.Iterations)
+			}
+		})
+		agentLoop.SetOnTokenUsage(func(sessionKey string, prompt, completion int) {
+			activityTracker.AddTokens(sessionKey, prompt, completion)
+		})
+
+		// Wire tool result events to QA tracker
+		agentLoop.SetOnToolResult(func(event agent.ToolResultEvent) {
+			qaTracker.HandleToolResult(event.ToolName, event.Command, event.Output, event.IsError)
+		})
+
+		cronService := setupCronTool(agentLoop, msgBus, cfg.WorkspacePath(), false)
+
+		heartbeatService := heartbeat.NewHeartbeatService(
+			cfg.WorkspacePath(),
+			cfg.Heartbeat.Interval,
+			cfg.Heartbeat.Enabled,
+		)
+		heartbeatService.SetBus(msgBus)
+		heartbeatService.SetHandler(func(prompt, channel, chatID string) *tools.ToolResult {
+			if channel == "" || chatID == "" {
+				channel, chatID = "tui", "local"
+			}
+			response, err := agentLoop.ProcessHeartbeat(context.Background(), prompt, channel, chatID)
+			if err != nil {
+				return tools.ErrorResult(fmt.Sprintf("Heartbeat error: %v", err))
+			}
+			if response == "HEARTBEAT_OK" {
+				return tools.SilentResult("Heartbeat OK")
+			}
+			return tools.SilentResult(response)
+		})
+
+		channelManager, err := channels.NewManager(cfg, msgBus)
+		if err != nil {
+			logger.ErrorCF("tui-bb", "Failed to create channel manager", map[string]interface{}{"error": err.Error()})
+			return
+		}
+
+		var transcriber *voice.GroqTranscriber
+		if cfg.Providers.Groq.APIKey != "" {
+			transcriber = voice.NewGroqTranscriber(cfg.Providers.Groq.APIKey)
+		}
+		if transcriber != nil {
+			if telegramChannel, ok := channelManager.GetChannel("telegram"); ok {
+				if tc, ok := telegramChannel.(*channels.TelegramChannel); ok {
+					tc.SetTranscriber(transcriber)
+				}
+			}
+			if discordChannel, ok := channelManager.GetChannel("discord"); ok {
+				if dc, ok := discordChannel.(*channels.DiscordChannel); ok {
+					dc.SetTranscriber(transcriber)
+				}
+			}
+			if slackChannel, ok := channelManager.GetChannel("slack"); ok {
+				if sc, ok := slackChannel.(*channels.SlackChannel); ok {
+					sc.SetTranscriber(transcriber)
+				}
+			}
+			if whatsappChannel, ok := channelManager.GetChannel("whatsapp"); ok {
+				if wc, ok := whatsappChannel.(*channels.WhatsAppChannel); ok {
+					wc.SetTranscriber(transcriber)
+				}
+			}
+		}
+
+		// Register bubbletea TUI channel
+		channelManager.RegisterChannel("tui", btApp.GetChannel())
+
+		if err := cronService.Start(); err != nil {
+			logger.ErrorCF("tui-bb", "Failed to start cron service", map[string]interface{}{"error": err.Error()})
+		}
+
+		if err := heartbeatService.Start(); err != nil {
+			logger.ErrorCF("tui-bb", "Failed to start heartbeat service", map[string]interface{}{"error": err.Error()})
+		}
+
+		stateManager := state.NewManager(cfg.WorkspacePath())
+		deviceService := devices.NewService(devices.Config{
+			Enabled:    cfg.Devices.Enabled,
+			MonitorUSB: cfg.Devices.MonitorUSB,
+		}, stateManager)
+		deviceService.SetBus(msgBus)
+		if err := deviceService.Start(ctx); err != nil {
+			logger.ErrorCF("tui-bb", "Failed to start device service", map[string]interface{}{"error": err.Error()})
+		}
+
+		if err := channelManager.StartAll(ctx); err != nil {
+			logger.ErrorCF("tui-bb", "Failed to start channels", map[string]interface{}{"error": err.Error()})
+		}
+
+		go agentLoop.Run(ctx)
+
+		logger.InfoC("tui-bb", "All services started")
+
+		<-ctx.Done()
+		deviceService.Stop()
+		heartbeatService.Stop()
+		cronService.Stop()
+		agentLoop.Stop()
+		channelManager.StopAll(ctx)
+	}()
+
+	// Run bubbletea TUI (blocks until user quits with Ctrl+C)
+	if err := btApp.Run(); err != nil {
+		fmt.Printf("TUI error: %v\n", err)
+	}
+
+	cancel()
+	time.Sleep(500 * time.Millisecond)
+}
+
+// buildConfigCallbacks creates the config callbacks that wire the config page
+// to the real config file and model router.
+func buildConfigCallbacks(cfg *config.Config, configPath string, router *agent.ModelRouter) *organisms.ConfigCallbacks {
+	// Helper: get provider config by name
+	getProvider := func(name string) *config.ProviderConfig {
+		switch name {
+		case "anthropic":
+			return &cfg.Providers.Anthropic
+		case "openai":
+			return &cfg.Providers.OpenAI
+		case "openrouter":
+			return &cfg.Providers.OpenRouter
+		case "groq":
+			return &cfg.Providers.Groq
+		case "zhipu":
+			return &cfg.Providers.Zhipu
+		case "vllm":
+			return &cfg.Providers.VLLM
+		case "gemini":
+			return &cfg.Providers.Gemini
+		case "nvidia":
+			return &cfg.Providers.Nvidia
+		case "ollama":
+			return &cfg.Providers.Ollama
+		case "moonshot":
+			return &cfg.Providers.Moonshot
+		case "deepseek":
+			return &cfg.Providers.DeepSeek
+		case "github_copilot":
+			return &cfg.Providers.GitHubCopilot
+		default:
+			return nil
+		}
+	}
+
+	// List of all known provider names
+	providerNames := []string{
+		"anthropic", "openai", "openrouter", "groq", "zhipu",
+		"vllm", "gemini", "nvidia", "ollama", "moonshot",
+		"deepseek", "github_copilot",
+	}
+
+	return &organisms.ConfigCallbacks{
+		GetProviders: func() []organisms.ConfigItem {
+			var items []organisms.ConfigItem
+			for _, name := range providerNames {
+				pc := getProvider(name)
+				if pc == nil {
+					continue
+				}
+				status := "not configured"
+				if pc.APIKey != "" {
+					status = "configured (key set)"
+				} else if pc.APIBase != "" {
+					status = "configured (base: " + pc.APIBase + ")"
+				}
+				items = append(items, organisms.ConfigItem{
+					Key:     name,
+					Value:   status,
+					Summary: status,
+					Fields: map[string]string{
+						"api_key":  pc.APIKey,
+						"api_base": pc.APIBase,
+					},
+				})
+			}
+			return items
+		},
+
+		GetModels: func() []organisms.ConfigItem {
+			return []organisms.ConfigItem{
+				{
+					Key:     "default",
+					Value:   cfg.Agents.Defaults.Model,
+					Summary: cfg.Agents.Defaults.Model,
+				},
+			}
+		},
+
+		GetChannelModels: func() []organisms.ConfigItem {
+			var items []organisms.ConfigItem
+			for ch, model := range cfg.Agents.Models {
+				items = append(items, organisms.ConfigItem{
+					Key:     ch,
+					Value:   model,
+					Summary: model,
+				})
+			}
+			return items
+		},
+
+		GetAliases: func() []organisms.ConfigItem {
+			var items []organisms.ConfigItem
+			aliases := router.GetAliases()
+			for alias, model := range aliases {
+				items = append(items, organisms.ConfigItem{
+					Key:     alias,
+					Value:   model,
+					Summary: model,
+				})
+			}
+			return items
+		},
+
+		SaveProvider: func(name string, fields map[string]string) error {
+			pc := getProvider(name)
+			if pc == nil {
+				return fmt.Errorf("unknown provider: %s", name)
+			}
+			if v, ok := fields["api_key"]; ok {
+				pc.APIKey = v
+			}
+			if v, ok := fields["api_base"]; ok {
+				pc.APIBase = v
+			}
+			return config.SaveConfig(configPath, cfg)
+		},
+
+		SaveModel: func(name string) error {
+			cfg.Agents.Defaults.Model = name
+			router.SetDefaultModel(name)
+			return config.SaveConfig(configPath, cfg)
+		},
+
+		SaveChannelModel: func(channel, model string) error {
+			if cfg.Agents.Models == nil {
+				cfg.Agents.Models = make(map[string]string)
+			}
+			cfg.Agents.Models[channel] = model
+			router.SetChannelModel(channel, model)
+			return config.SaveConfig(configPath, cfg)
+		},
+
+		SaveAlias: func(alias, model string) error {
+			if cfg.Agents.Aliases == nil {
+				cfg.Agents.Aliases = make(map[string]string)
+			}
+			cfg.Agents.Aliases[alias] = model
+			router.SetAlias(alias, model)
+			return config.SaveConfig(configPath, cfg)
+		},
+
+		DeleteItem: func(section, key string) error {
+			switch section {
+			case "Providers":
+				pc := getProvider(key)
+				if pc != nil {
+					pc.APIKey = ""
+					pc.APIBase = ""
+				}
+			case "Channel Models":
+				delete(cfg.Agents.Models, key)
+				router.DeleteChannelModel(key)
+			case "Aliases":
+				delete(cfg.Agents.Aliases, key)
+				router.DeleteAlias(key)
+			}
+			return config.SaveConfig(configPath, cfg)
+		},
+	}
 }
