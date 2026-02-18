@@ -13,6 +13,7 @@ type ConfigSectionSelectedMsg struct{ Section string }
 type ConfigItemSelectedMsg struct{ Section, Key string }
 type ConfigItemDeleteMsg struct{ Section, Key string }
 type ConfigDeletedMsg struct{ Section, Key string }
+type ConfigAddItemMsg struct{ Section string }
 type ConfigExitMsg struct{}
 
 // ConfigItem represents a single item within a config section.
@@ -104,6 +105,12 @@ func (m ConfigNavModel) Update(msg tea.Msg) (ConfigNavModel, tea.Cmd) {
 				key := m.items[m.itemIdx].Key
 				return m, func() tea.Msg { return ConfigItemSelectedMsg{Section: section, Key: key} }
 			}
+		case "a":
+			// Add new item to current section
+			if m.sectionIdx < len(m.sections) {
+				section := m.sections[m.sectionIdx]
+				return m, func() tea.Msg { return ConfigAddItemMsg{Section: section} }
+			}
 		case "d":
 			if m.focusedPanel == 1 && len(m.items) > 0 && m.itemIdx < len(m.items) {
 				section := m.sections[m.sectionIdx]
@@ -165,7 +172,7 @@ func (m ConfigNavModel) renderItems() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("\n" + lipgloss.NewStyle().Faint(true).Render("Enter: edit | d: delete | Tab: switch panel"))
+	b.WriteString("\n" + lipgloss.NewStyle().Faint(true).Render("Enter: edit | a: add | d: delete | Tab: switch panel"))
 	return atoms.RenderPanel("ITEMS", m.focused && m.focusedPanel == 1, w, m.height, b.String())
 }
 

@@ -2,12 +2,14 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/sipeed/picoclaw/pkg/agent"
 	"github.com/sipeed/picoclaw/pkg/tui/domain"
 	"github.com/sipeed/picoclaw/pkg/tui/organisms"
 	"github.com/sipeed/picoclaw/pkg/tui/pages"
@@ -47,6 +49,9 @@ type Model struct {
 
 	// Callback when model is selected from picker
 	onModelSelected func(model, scope, channel string)
+
+	// Reference to model router for dynamic model list building
+	modelRouter *agent.ModelRouter
 
 	// Deferred state — stored for propagation after pages are initialized
 	configCallbacks *organisms.ConfigCallbacks
@@ -99,9 +104,56 @@ func (m *Model) SetQATracker(qt *domain.QATracker) {
 	}
 }
 
-// SetModelPickerData configures the model picker with available models, channels, and aliases.
-func (m *Model) SetModelPickerData(models, channels []string, currentModel string, aliases map[string]string) {
-	m.modelPicker.SetData(models, channels, currentModel, aliases)
+// SetModelRouterRef stores a reference to the model router for dynamic model list building.
+func (m *Model) SetModelRouterRef(router *agent.ModelRouter) {
+	m.modelRouter = router
+}
+
+// refreshModelPickerData rebuilds the model picker data from the router and config callbacks.
+func (m *Model) refreshModelPickerData() {
+	if m.modelRouter == nil {
+		return
+	}
+
+	aliases := m.modelRouter.GetAliases()
+	channelModels := m.modelRouter.GetChannelModels()
+	defaultModel := m.modelRouter.DefaultModel()
+
+	// Collect unique models from all sources
+	modelSet := make(map[string]struct{})
+	if defaultModel != "" {
+		modelSet[defaultModel] = struct{}{}
+	}
+	for _, mdl := range aliases {
+		modelSet[mdl] = struct{}{}
+	}
+	for _, mdl := range channelModels {
+		modelSet[mdl] = struct{}{}
+	}
+
+	// Include provider-aware catalog from config callbacks
+	if m.configCallbacks != nil && m.configCallbacks.GetKnownModels != nil {
+		for _, mdl := range m.configCallbacks.GetKnownModels() {
+			modelSet[mdl] = struct{}{}
+		}
+	}
+
+	models := make([]string, 0, len(modelSet))
+	for mdl := range modelSet {
+		if mdl != "" {
+			models = append(models, mdl)
+		}
+	}
+	sort.Strings(models)
+
+	// Build channel list
+	chans := make([]string, 0, len(channelModels)+1)
+	chans = append(chans, "session")
+	for ch := range channelModels {
+		chans = append(chans, ch)
+	}
+
+	m.modelPicker.SetData(models, chans, defaultModel, aliases)
 }
 
 // SetWorkspacePath stores the workspace path for propagation to session panels.
@@ -226,6 +278,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.modelPicker.Visible {
 				m.modelPicker.Hide()
 			} else {
+				m.refreshModelPickerData()
 				m.modelPicker.Show()
 			}
 			return m, nil

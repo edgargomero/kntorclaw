@@ -1941,6 +1941,69 @@ func buildConfigCallbacks(cfg *config.Config, configPath string, router *agent.M
 	}
 
 	return &organisms.ConfigCallbacks{
+		GetKnownModels: func() []string {
+			var models []string
+			if cfg.Providers.Anthropic.APIKey != "" || cfg.Providers.Anthropic.AuthMethod != "" {
+				models = append(models,
+					"claude-sonnet-4-5-20250929@anthropic",
+					"claude-opus-4-6@anthropic",
+					"claude-haiku-4-5-20251001@anthropic",
+				)
+			}
+			if cfg.Providers.Anthropic.AuthMethod != "" {
+				models = append(models,
+					"claude-sonnet-4-5-20250929@anthropic-cc",
+					"claude-opus-4-6@anthropic-cc",
+					"claude-haiku-4-5-20251001@anthropic-cc",
+				)
+			}
+			if cfg.Providers.OpenAI.APIKey != "" || cfg.Providers.OpenAI.AuthMethod != "" {
+				models = append(models,
+					"gpt-4o@openai", "gpt-4o-mini@openai",
+					"gpt-4.1@openai", "gpt-4.1-mini@openai", "o3-mini@openai",
+				)
+			}
+			if cfg.Providers.Gemini.APIKey != "" {
+				models = append(models,
+					"gemini-2.5-pro@gemini", "gemini-2.5-flash@gemini", "gemini-2.0-flash@gemini",
+				)
+			}
+			if cfg.Providers.Groq.APIKey != "" {
+				models = append(models,
+					"llama-3.3-70b-versatile@groq", "llama-3.1-8b-instant@groq", "mixtral-8x7b-32768@groq",
+				)
+			}
+			if cfg.Providers.DeepSeek.APIKey != "" {
+				models = append(models, "deepseek-chat@deepseek", "deepseek-reasoner@deepseek")
+			}
+			if cfg.Providers.Moonshot.APIKey != "" {
+				models = append(models, "kimi-k2.5@moonshot", "moonshot-v1-128k@moonshot")
+			}
+			if cfg.Providers.Zhipu.APIKey != "" {
+				models = append(models, "glm-4.7@zhipu", "glm-4-plus@zhipu", "glm-4-flash@zhipu")
+			}
+			if cfg.Providers.Nvidia.APIKey != "" {
+				models = append(models,
+					"nvidia/llama-3.1-nemotron-70b-instruct@nvidia", "z-ai/glm5@nvidia",
+				)
+			}
+			if cfg.Providers.OpenRouter.APIKey != "" {
+				models = append(models,
+					"anthropic/claude-sonnet-4-5-20250929@openrouter",
+					"openai/gpt-4o@openrouter",
+					"google/gemini-2.5-pro@openrouter",
+					"meta-llama/llama-3.3-70b-instruct@openrouter",
+				)
+			}
+			if cfg.Providers.Ollama.APIBase != "" {
+				models = append(models, "llama3.2@ollama", "qwen2.5@ollama")
+			}
+			if cfg.Providers.VLLM.APIBase != "" {
+				models = append(models, "default@vllm")
+			}
+			return models
+		},
+
 		GetProviders: func() []organisms.ConfigItem {
 			var items []organisms.ConfigItem
 			for _, name := range providerNames {

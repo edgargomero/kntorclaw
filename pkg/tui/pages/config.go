@@ -120,6 +120,21 @@ func (m ConfigPageModel) Update(msg tea.Msg) (ConfigPageModel, tea.Cmd) {
 		}
 		return m, nil
 
+	case organisms.ConfigAddItemMsg:
+		// Open editor with empty values for a new item
+		switch msg.Section {
+		case "Providers":
+			// Providers are predefined; open editor for a provider to configure its key
+			m.editor.OpenProvider("new-provider", nil)
+		case "Channel Models":
+			m.editor.OpenChannel("", "")
+		case "Aliases":
+			m.editor.OpenAlias("", "")
+		case "Default Model":
+			m.editor.OpenModel("default", "")
+		}
+		return m, nil
+
 	case organisms.ConfigItemDeleteMsg:
 		m.pendingDelete.section = msg.Section
 		m.pendingDelete.key = msg.Key
@@ -165,7 +180,7 @@ func (m ConfigPageModel) Update(msg tea.Msg) (ConfigPageModel, tea.Cmd) {
 
 // View renders the config page with nav panels and any active overlays.
 func (m ConfigPageModel) View() string {
-	footer := "F8: exit config | Tab: switch panel | Enter: edit | d: delete"
+	footer := "F8: exit config | Tab: switch panel | Enter: edit | a: add | d: delete"
 
 	base := templates.RenderConfigLayout(m.width, m.height, templates.ConfigLayoutPanels{
 		StatusBar: m.renderStatusBar(),
@@ -200,7 +215,7 @@ func (m ConfigPageModel) renderStatusBar() string {
 		}
 	}
 
-	parts = append(parts, hintStyle.Render("Tab:Switch Enter:Edit d:Delete Esc:Back F8:Exit"))
+	parts = append(parts, hintStyle.Render("Tab:Switch Enter:Edit a:Add d:Delete Esc:Back F8:Exit"))
 
 	content := strings.Join(parts, " ")
 	return atoms.StatusBarStyle.Width(m.width).Render(content)

@@ -72,33 +72,7 @@ func (a *BubbleteaApp) SetHealthChecker(hc *providers.HealthChecker) {
 // SetModelRouter configures the model picker with data from the router and
 // wires model selection callbacks to update the router.
 func (a *BubbleteaApp) SetModelRouter(router *agent.ModelRouter) {
-	// Extract data for model picker
-	aliases := router.GetAliases()
-	channelModels := router.GetChannelModels()
-	defaultModel := router.DefaultModel()
-
-	// Build model list: collect unique models from aliases + channel models + default
-	modelSet := make(map[string]struct{})
-	modelSet[defaultModel] = struct{}{}
-	for _, m := range aliases {
-		modelSet[m] = struct{}{}
-	}
-	for _, m := range channelModels {
-		modelSet[m] = struct{}{}
-	}
-	models := make([]string, 0, len(modelSet))
-	for m := range modelSet {
-		models = append(models, m)
-	}
-
-	// Build channel list from channel models
-	chans := make([]string, 0, len(channelModels)+1)
-	chans = append(chans, "session") // always have session scope
-	for ch := range channelModels {
-		chans = append(chans, ch)
-	}
-
-	a.model.SetModelPickerData(models, chans, defaultModel, aliases)
+	a.model.SetModelRouterRef(router)
 
 	// Wire model selection callback
 	a.model.SetOnModelSelected(func(model, scope, channel string) {

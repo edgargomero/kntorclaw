@@ -8,6 +8,7 @@ type ConfigCallbacks struct {
 	GetModels        func() []ConfigItem
 	GetChannelModels func() []ConfigItem
 	GetAliases       func() []ConfigItem
+	GetKnownModels   func() []string // provider-aware model catalog
 
 	// Actions
 	SaveProvider     func(name string, fields map[string]string) error

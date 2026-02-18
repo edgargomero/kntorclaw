@@ -86,9 +86,18 @@ func (m *ConfigEditorModel) OpenChannel(key string, currentModel string) {
 	m.editorType = EditorChannel
 	m.section = "Channel Models"
 	m.key = key
-	m.form = molecules.NewTextForm("Edit Channel Model: "+key, []molecules.FormField{
-		{Label: "Model", Placeholder: "e.g. claude-sonnet-4-5-20250929@anthropic", Value: currentModel},
-	})
+	title := "Edit Channel Model"
+	if key != "" {
+		title += ": " + key
+	} else {
+		title = "Add Channel Model"
+	}
+	fields := []molecules.FormField{}
+	if key == "" {
+		fields = append(fields, molecules.FormField{Label: "Channel", Placeholder: "e.g. telegram, discord, whatsapp"})
+	}
+	fields = append(fields, molecules.FormField{Label: "Model", Placeholder: "e.g. claude-sonnet-4-5-20250929@anthropic", Value: currentModel})
+	m.form = molecules.NewTextForm(title, fields)
 	m.form.Show()
 	m.Visible = true
 }
@@ -98,9 +107,18 @@ func (m *ConfigEditorModel) OpenAlias(key string, currentValue string) {
 	m.editorType = EditorAlias
 	m.section = "Aliases"
 	m.key = key
-	m.form = molecules.NewTextForm("Edit Alias: "+key, []molecules.FormField{
-		{Label: "Model", Placeholder: "e.g. claude-sonnet-4-5-20250929@anthropic", Value: currentValue},
-	})
+	title := "Edit Alias"
+	if key != "" {
+		title += ": " + key
+	} else {
+		title = "Add Alias"
+	}
+	fields := []molecules.FormField{}
+	if key == "" {
+		fields = append(fields, molecules.FormField{Label: "Alias", Placeholder: "e.g. sonnet, opus, haiku"})
+	}
+	fields = append(fields, molecules.FormField{Label: "Model", Placeholder: "e.g. claude-sonnet-4-5-20250929@anthropic", Value: currentValue})
+	m.form = molecules.NewTextForm(title, fields)
 	m.form.Show()
 	m.Visible = true
 }
@@ -160,11 +178,21 @@ func (m *ConfigEditorModel) invokeSave(key string, values map[string]string) {
 		}
 	case EditorChannel:
 		if m.callbacks.SaveChannelModel != nil {
-			_ = m.callbacks.SaveChannelModel(key, values["Model"])
+			// If key is empty, get it from the Channel form field
+			ch := key
+			if ch == "" {
+				ch = values["Channel"]
+			}
+			_ = m.callbacks.SaveChannelModel(ch, values["Model"])
 		}
 	case EditorAlias:
 		if m.callbacks.SaveAlias != nil {
-			_ = m.callbacks.SaveAlias(key, values["Model"])
+			// If key is empty, get it from the Alias form field
+			alias := key
+			if alias == "" {
+				alias = values["Alias"]
+			}
+			_ = m.callbacks.SaveAlias(alias, values["Model"])
 		}
 	}
 }
