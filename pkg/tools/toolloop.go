@@ -23,12 +23,22 @@ type ToolLoopConfig struct {
 	Tools         *ToolRegistry
 	MaxIterations int
 	LLMOptions    map[string]any
+	// PlanningPrompt, if non-empty, executes a planning step before the main
+	// tool loop. The plan is injected into the system message so the agent
+	// knows which steps to follow.
+	PlanningPrompt string
+	// PlanningModel is the model used for the planning step. Defaults to
+	// Model if empty.
+	PlanningModel string
 }
 
 // ToolLoopResult contains the result of running the tool loop.
 type ToolLoopResult struct {
-	Content    string
-	Iterations int
+	Content      string
+	Iterations   int
+	InputTokens  int
+	OutputTokens int
+	ToolsUsed    []string
 }
 
 // RunToolLoop executes the LLM + tool call iteration loop.
@@ -36,6 +46,38 @@ type ToolLoopResult struct {
 func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []providers.Message, channel, chatID string) (*ToolLoopResult, error) {
 	iteration := 0
 	var finalContent string
+	var inputTokens, outputTokens int
+	var toolsUsed []string
+
+	// Planning step: runs a single LLM call (no tools) to produce an execution
+	// plan that is injected into the system message before the main loop.
+	if config.PlanningPrompt != "" && len(messages) >= 2 {
+		planModel := config.PlanningModel
+		if planModel == "" {
+			planModel = config.Model
+		}
+		planUserContent := messages[1].Content + "\n\nCreate a step-by-step execution plan."
+		planResp, err := config.Provider.Chat(ctx,
+			[]providers.Message{
+				{Role: "system", Content: config.PlanningPrompt},
+				{Role: "user", Content: planUserContent},
+			},
+			nil, planModel,
+			map[string]any{"max_tokens": 1024, "temperature": 0.3},
+		)
+		if err == nil && planResp != nil && planResp.Content != "" {
+			messages[0].Content += "\n\n## Your Execution Plan\n" + planResp.Content
+			if planResp.Usage != nil {
+				inputTokens += planResp.Usage.PromptTokens
+				outputTokens += planResp.Usage.CompletionTokens
+			}
+			logger.DebugCF("toolloop", "Planning step completed",
+				map[string]any{"plan_length": len(planResp.Content), "model": planModel})
+		} else if err != nil {
+			logger.WarnCF("toolloop", "Planning step failed (continuing without plan)",
+				map[string]any{"error": err.Error()})
+		}
+	}
 
 	for iteration < config.MaxIterations {
 		iteration++
@@ -72,7 +114,13 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 			return nil, fmt.Errorf("LLM call failed: %w", err)
 		}
 
-		// 4. If no tool calls, we're done
+		// 4. Track token usage
+		if response.Usage != nil {
+			inputTokens += response.Usage.PromptTokens
+			outputTokens += response.Usage.CompletionTokens
+		}
+
+		// 5. If no tool calls, we're done
 		if len(response.ToolCalls) == 0 {
 			finalContent = response.Content
 			logger.InfoCF("toolloop", "LLM response without tool calls (direct answer)",
@@ -83,7 +131,7 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 			break
 		}
 
-		// 5. Log tool calls
+		// 6. Log tool calls
 		toolNames := make([]string, 0, len(response.ToolCalls))
 		for _, tc := range response.ToolCalls {
 			toolNames = append(toolNames, tc.Name)
@@ -95,7 +143,7 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 				"iteration": iteration,
 			})
 
-		// 6. Build assistant message with tool calls
+		// 7. Build assistant message with tool calls
 		assistantMsg := providers.Message{
 			Role:    "assistant",
 			Content: response.Content,
@@ -114,8 +162,9 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 		}
 		messages = append(messages, assistantMsg)
 
-		// 7. Execute tool calls
+		// 8. Execute tool calls
 		for _, tc := range response.ToolCalls {
+			toolsUsed = append(toolsUsed, tc.Name)
 			argsJSON, _ := json.Marshal(tc.Arguments)
 			argsPreview := utils.Truncate(string(argsJSON), 200)
 			logger.InfoCF("toolloop", fmt.Sprintf("Tool call: %s(%s)", tc.Name, argsPreview),
@@ -149,7 +198,10 @@ func RunToolLoop(ctx context.Context, config ToolLoopConfig, messages []provider
 	}
 
 	return &ToolLoopResult{
-		Content:    finalContent,
-		Iterations: iteration,
+		Content:      finalContent,
+		Iterations:   iteration,
+		InputTokens:  inputTokens,
+		OutputTokens: outputTokens,
+		ToolsUsed:    toolsUsed,
 	}, nil
 }

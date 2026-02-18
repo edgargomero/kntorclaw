@@ -316,6 +316,13 @@ func buildGitContext(workspace string) string {
 	return strings.Join(parts, "\n\n")
 }
 
+// GetSkillLoader returns the LoadSkill function of the underlying skills loader.
+// This allows other components (e.g. SolveTool) to resolve skill content by
+// name without taking a direct dependency on the skills package.
+func (cb *ContextBuilder) GetSkillLoader() func(name string) (string, bool) {
+	return cb.skillsLoader.LoadSkill
+}
+
 // GetSkillsInfo returns information about loaded skills.
 func (cb *ContextBuilder) GetSkillsInfo() map[string]interface{} {
 	allSkills := cb.skillsLoader.ListSkills()
